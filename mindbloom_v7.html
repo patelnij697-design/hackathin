@@ -1,0 +1,1715 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>MindBloom · Daily Wellness</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+// ═══════════════════════════════════════════════════════════════════
+// CLAY SCULPT — Three.js 3D head with deformation & punch physics
+// ═══════════════════════════════════════════════════════════════════
+let clayRenderer=null, clayScene=null, clayCamera=null, clayAnimId=null;
+let clayHead=null, clayOrigPositions=null;
+let clayHP=100, clayName='', clayGender='male', clayBroken=false;
+let clayRotY=0, clayAutoRotate=true;
+let claySetupDone=false;
+let claySelectedGender=null;
+let clayParticles=[], clayPunchCount=0;
+
+function selectClayGender(g){
+  claySelectedGender=g;
+  ['male','female','round'].forEach(x=>{
+    document.getElementById('g-'+x).classList.toggle('selected',x===g);
+  });
+  document.getElementById('clay-start-btn').disabled=false;
+}
+
+function initClayTab(){
+  if(claySetupDone&&clayScene) return;
+  // reset
+  claySelectedGender=null;
+  ['male','female','round'].forEach(x=>document.getElementById('g-'+x).classList.remove('selected'));
+  document.getElementById('clay-start-btn').disabled=true;
+  document.getElementById('clay-name-input').value='';
+  document.getElementById('clay-setup').classList.remove('hidden');
+  document.getElementById('clay-scene').classList.add('hidden');
+  document.getElementById('clay-broken-msg').classList.remove('show');
+}
+
+function startClaySculpt(){
+  if(!claySelectedGender) return;
+  clayName=document.getElementById('clay-name-input').value.trim()||'???';
+  clayGender=claySelectedGender;
+  document.getElementById('clay-setup').classList.add('hidden');
+  document.getElementById('clay-scene').classList.remove('hidden');
+  document.getElementById('clay-name-tag-label').textContent=clayName;
+  clayHP=100; clayBroken=false; clayPunchCount=0; clayParticles=[];
+  updateHPBar();
+  document.getElementById('clay-broken-msg').classList.remove('show');
+  claySetupDone=true;
+  setTimeout(buildClayScene, 50);
+}
+
+function buildClayScene(){
+  const wrap=document.getElementById('clay-canvas-wrap');
+  const canvas=document.getElementById('clay-canvas');
+  const W=wrap.clientWidth, H=Math.min(360, W*0.88);
+  canvas.width=W*window.devicePixelRatio;
+  canvas.height=H*window.devicePixelRatio;
+  canvas.style.height=H+'px';
+  wrap.style.height=H+'px';
+
+  if(clayAnimId){ cancelAnimationFrame(clayAnimId); clayAnimId=null; }
+  if(clayRenderer){ clayRenderer.dispose(); clayRenderer=null; }
+
+  clayScene=new THREE.Scene();
+  clayScene.background=new THREE.Color(0x0d0618);
+  // Subtle fog
+  clayScene.fog=new THREE.Fog(0x0d0618,8,20);
+
+  clayCamera=new THREE.PerspectiveCamera(45, W/H, 0.1, 100);
+  clayCamera.position.set(0,0.5,5.5);
+
+  clayRenderer=new THREE.WebGLRenderer({canvas,antialias:true,alpha:false});
+  clayRenderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
+  clayRenderer.setSize(W,H,false);
+  clayRenderer.shadowMap.enabled=true;
+
+  // Lights
+  const amb=new THREE.AmbientLight(0x9966cc,0.4);
+  clayScene.add(amb);
+  const key=new THREE.DirectionalLight(0xffeedd,1.4);
+  key.position.set(2,3,3); key.castShadow=true;
+  clayScene.add(key);
+  const fill=new THREE.DirectionalLight(0x6644aa,0.5);
+  fill.position.set(-3,1,-2);
+  clayScene.add(fill);
+  const rim=new THREE.PointLight(0xff8844,0.7,8);
+  rim.position.set(0,2,-2);
+  clayScene.add(rim);
+
+  // Ground plane
+  const floor=new THREE.Mesh(
+    new THREE.PlaneGeometry(10,10),
+    new THREE.MeshStandardMaterial({color:0x110022,roughness:1})
+  );
+  floor.rotation.x=-Math.PI/2; floor.position.y=-1.6; floor.receiveShadow=true;
+  clayScene.add(floor);
+
+  buildHead();
+  setupClayInteraction(canvas, wrap, W, H);
+  clayLoop();
+}
+
+function buildHead(){
+  if(clayHead){ clayScene.remove(clayHead); clayHead=null; }
+
+  const group=new THREE.Group();
+
+  // Skin tone based on gender
+  const hue=clayGender==='male'?0.055:clayGender==='female'?0.06:0.065;
+  const skinMat=new THREE.MeshStandardMaterial({
+    color: new THREE.Color().setHSL(hue,0.5,0.60),
+    roughness:0.82, metalness:0.0,
+  });
+  const darkMat=new THREE.MeshStandardMaterial({color:new THREE.Color().setHSL(hue,0.55,0.40),roughness:0.9});
+
+  // ── HEAD ──
+  let headGeo;
+  if(clayGender==='male'){
+    headGeo=new THREE.SphereGeometry(0.72,48,48);
+    const pos=headGeo.attributes.position;
+    for(let i=0;i<pos.count;i++){
+      const y=pos.getY(i),x=pos.getX(i),z=pos.getZ(i);
+      // Squarish jaw
+      if(y<-0.15){ pos.setX(i,x*1.18); pos.setZ(i,z*1.05); }
+      // Narrower top
+      if(y>0.45){ pos.setX(i,x*0.88); pos.setZ(i,z*0.85); }
+      // Forehead bump
+      if(y>0.15&&z>0) pos.setZ(i,z*1.1);
+    }
+    pos.needsUpdate=true; headGeo.computeVertexNormals();
+  } else if(clayGender==='female'){
+    headGeo=new THREE.SphereGeometry(0.67,48,48);
+    const pos=headGeo.attributes.position;
+    for(let i=0;i<pos.count;i++){
+      const y=pos.getY(i),x=pos.getX(i);
+      pos.setY(i,y*1.18); pos.setX(i,x*0.86);
+      if(y>-0.1&&y<0.25) pos.setX(i,pos.getX(i)*1.06);
+      if(y<-0.3) pos.setX(i,x*0.68);
+    }
+    pos.needsUpdate=true; headGeo.computeVertexNormals();
+  } else {
+    headGeo=new THREE.SphereGeometry(0.70,48,48);
+    const pos=headGeo.attributes.position;
+    for(let i=0;i<pos.count;i++) pos.setY(i,pos.getY(i)*0.97);
+    pos.needsUpdate=true; headGeo.computeVertexNormals();
+  }
+
+  const headMesh=new THREE.Mesh(headGeo,skinMat);
+  headMesh.position.y=1.05;
+  headMesh.castShadow=true; headMesh.receiveShadow=true;
+  group.add(headMesh);
+
+  // ── NECK ──
+  const neckGeo=new THREE.CylinderGeometry(0.22,0.26,0.38,20);
+  const neck=new THREE.Mesh(neckGeo,skinMat.clone());
+  neck.position.y=0.64;
+  group.add(neck);
+
+  // ── TORSO ──
+  const torsoW=clayGender==='male'?0.72:0.60, torsoD=0.36;
+  const torsoGeo=new THREE.CylinderGeometry(torsoW*0.82,torsoW,0.95,20);
+  const torsoMat=new THREE.MeshStandardMaterial({
+    color:new THREE.Color().setHSL(hue,0.42,0.48),roughness:0.88
+  });
+  const torso=new THREE.Mesh(torsoGeo,torsoMat);
+  torso.position.y=0.10; torso.scale.z=torsoD/torsoW*1.3;
+  torso.castShadow=true;
+  group.add(torso);
+
+  // ── SHOULDERS (clavicle area) ──
+  [-1,1].forEach(side=>{
+    const shGeo=new THREE.SphereGeometry(0.22,16,12);
+    const sh=new THREE.Mesh(shGeo,torsoMat.clone());
+    sh.position.set(side*(torsoW*0.9),0.50,0);
+    sh.scale.set(1.1,0.7,0.85);
+    sh.castShadow=true;
+    group.add(sh);
+
+    // ── UPPER ARM ──
+    const uaGeo=new THREE.CylinderGeometry(0.13,0.16,0.62,14);
+    const ua=new THREE.Mesh(uaGeo,skinMat.clone());
+    ua.position.set(side*(torsoW*0.9+0.20),0.14,0);
+    ua.rotation.z=side*0.28;
+    ua.castShadow=true;
+    group.add(ua);
+
+    // ── ELBOW ──
+    const elGeo=new THREE.SphereGeometry(0.13,12,10);
+    const el=new THREE.Mesh(elGeo,skinMat.clone());
+    el.position.set(side*(torsoW*0.9+0.32),-0.22,0);
+    el.scale.set(1,0.9,0.9);
+    group.add(el);
+
+    // ── LOWER ARM ──
+    const laGeo=new THREE.CylinderGeometry(0.10,0.13,0.55,14);
+    const la=new THREE.Mesh(laGeo,skinMat.clone());
+    la.position.set(side*(torsoW*0.9+0.28),-0.52,0.04);
+    la.rotation.z=side*0.15;
+    la.castShadow=true;
+    group.add(la);
+
+    // ── HAND (simple fist-like sphere) ──
+    const hndGeo=new THREE.SphereGeometry(0.14,12,10);
+    const hnd=new THREE.Mesh(hndGeo,skinMat.clone());
+    hnd.position.set(side*(torsoW*0.9+0.22),-0.82,0.06);
+    hnd.scale.set(1.2,0.85,0.9);
+    group.add(hnd);
+  });
+
+  // ── CHEST DETAIL (pecs or bust depending on gender) ──
+  if(clayGender==='male'){
+    [-0.24,0.24].forEach(xOff=>{
+      const pecGeo=new THREE.SphereGeometry(0.22,16,12);
+      const pec=new THREE.Mesh(pecGeo,torsoMat.clone());
+      pec.position.set(xOff,0.42,0.26); pec.scale.set(1.2,0.7,0.6);
+      group.add(pec);
+    });
+  } else if(clayGender==='female'){
+    [-0.2,0.2].forEach(xOff=>{
+      const bustGeo=new THREE.SphereGeometry(0.18,16,12);
+      const bust=new THREE.Mesh(bustGeo,torsoMat.clone());
+      bust.position.set(xOff,0.26,0.28); bust.scale.set(1,1.0,0.75);
+      group.add(bust);
+    });
+  }
+
+  // Facial features
+  addFaceFeatures(group, hue, headMesh.position.y);
+
+  // Hair
+  addHair(group, hue, headMesh.position.y);
+
+  clayHead=group;
+  // Position group to center in viewport (torso visible but not too low)
+  group.position.y=-0.3;
+  clayScene.add(group);
+
+  // Store original vertex positions for deformation
+  const verts=headMesh.geometry.attributes.position;
+  clayOrigPositions=new Float32Array(verts.array);
+}
+
+function addFaceFeatures(group, hue, headY){
+  const hy=headY||1.05;
+  const darkMat=new THREE.MeshStandardMaterial({color:new THREE.Color().setHSL(hue,0.55,0.36),roughness:0.9});
+  const eyeWhite=new THREE.MeshStandardMaterial({color:0xfaf0e6,roughness:0.5});
+  const irisCol=clayGender==='male'?0x2c4a7c:clayGender==='female'?0x5c3a7c:0x3a5c3a;
+  const irisMat=new THREE.MeshStandardMaterial({color:irisCol,roughness:0.4});
+  const pupilMat=new THREE.MeshStandardMaterial({color:0x0a0a0a,roughness:0.5});
+  const eyeRadius=clayGender==='female'?0.088:0.082;
+  const eyeY=hy+0.06, eyeZ=0.65;
+  const eyeSpacing=0.24;
+
+  // Eyes
+  [[-eyeSpacing,eyeY,eyeZ],[eyeSpacing,eyeY,eyeZ]].forEach(([x,y,z])=>{
+    const sclera=new THREE.Mesh(new THREE.SphereGeometry(eyeRadius,14,10),eyeWhite);
+    sclera.position.set(x,y,z);
+    group.add(sclera);
+    const iris=new THREE.Mesh(new THREE.SphereGeometry(eyeRadius*0.62,12,8),irisMat);
+    iris.position.set(x,y,z+eyeRadius*0.82);
+    group.add(iris);
+    const pupil=new THREE.Mesh(new THREE.SphereGeometry(eyeRadius*0.32,8,6),pupilMat);
+    pupil.position.set(x,y,z+eyeRadius*0.95);
+    group.add(pupil);
+    // Eyelid crease
+    const lidGeo=new THREE.TorusGeometry(eyeRadius*0.9,eyeRadius*0.14,8,16,Math.PI);
+    const lid=new THREE.Mesh(lidGeo,darkMat.clone());
+    lid.position.set(x,y+eyeRadius*0.2,z+eyeRadius*0.4);
+    lid.rotation.x=-0.3;
+    group.add(lid);
+  });
+
+  // Eyebrows
+  [[-eyeSpacing,eyeY+0.14,eyeZ+0.32],[eyeSpacing,eyeY+0.14,eyeZ+0.32]].forEach(([x,y,z],i)=>{
+    const browGeo=new THREE.BoxGeometry(0.22,0.025,0.04);
+    const browMat=new THREE.MeshStandardMaterial({color:new THREE.Color().setHSL(hue,0.6,0.25),roughness:0.95});
+    const brow=new THREE.Mesh(browGeo,browMat);
+    brow.position.set(x,y,z);
+    brow.rotation.z=(i===0?0.1:-0.1); // slight arch
+    group.add(brow);
+  });
+
+  // Nose bridge + tip
+  const noseBridgeGeo=new THREE.CylinderGeometry(0.025,0.04,0.22,8);
+  const noseBridge=new THREE.Mesh(noseBridgeGeo,darkMat.clone());
+  noseBridge.position.set(0,hy-0.08,eyeZ+0.1);
+  noseBridge.rotation.x=0.35;
+  group.add(noseBridge);
+
+  const noseTipGeo=new THREE.SphereGeometry(clayGender==='female'?0.065:0.08,12,8);
+  const noseTip=new THREE.Mesh(noseTipGeo,darkMat.clone());
+  noseTip.position.set(0,hy-0.2,eyeZ+0.18); noseTip.scale.set(1.1,0.75,1.0);
+  group.add(noseTip);
+
+  // Nostrils
+  [-0.045,0.045].forEach(nx=>{
+    const nostGeo=new THREE.SphereGeometry(0.032,8,6);
+    const nost=new THREE.Mesh(nostGeo,new THREE.MeshStandardMaterial({color:0x1a0800,roughness:0.9}));
+    nost.position.set(nx,hy-0.22,eyeZ+0.14); nost.scale.set(1,0.65,0.8);
+    group.add(nost);
+  });
+
+  // Upper lip ridge
+  const ulipGeo=new THREE.SphereGeometry(0.09,12,8);
+  const ulip=new THREE.Mesh(ulipGeo,darkMat.clone());
+  ulip.position.set(0,hy-0.30,eyeZ+0.14); ulip.scale.set(1.6,0.45,0.8);
+  group.add(ulip);
+
+  // Mouth (smile arc)
+  const mouthGeo=new THREE.TorusGeometry(0.14,0.028,8,22,Math.PI);
+  const mouth=new THREE.Mesh(mouthGeo,new THREE.MeshStandardMaterial({color:new THREE.Color().setHSL(hue,0.6,0.30),roughness:0.8}));
+  mouth.position.set(0,hy-0.36,eyeZ+0.10); mouth.rotation.z=Math.PI;
+  group.add(mouth);
+
+  // Lips (lower)
+  const llipGeo=new THREE.SphereGeometry(0.075,12,8);
+  const llip=new THREE.Mesh(llipGeo,darkMat.clone());
+  llip.position.set(0,hy-0.4,eyeZ+0.13); llip.scale.set(1.5,0.5,0.75);
+  group.add(llip);
+
+  // Ears
+  [-1,1].forEach(side=>{
+    const earW=clayGender==='female'?0.62:0.72;
+    const earGeo=new THREE.SphereGeometry(0.12,12,8);
+    const ear=new THREE.Mesh(earGeo,new THREE.MeshStandardMaterial({color:new THREE.Color().setHSL(hue,0.48,0.52),roughness:0.88}));
+    ear.position.set(side*0.74,hy-0.04,0.05); ear.scale.set(earW,1,0.45);
+    group.add(ear);
+    // Inner ear
+    const innerGeo=new THREE.SphereGeometry(0.07,8,6);
+    const inner=new THREE.Mesh(innerGeo,new THREE.MeshStandardMaterial({color:new THREE.Color().setHSL(hue,0.5,0.36),roughness:0.9}));
+    inner.position.set(side*0.77,hy-0.04,0.08); inner.scale.set(earW*0.7,0.9,0.4);
+    group.add(inner);
+  });
+}
+
+function addHair(group, hue, headY){
+  const hy=headY||1.05;
+  const hairCol=clayGender==='female'?0x0d0800:0x120800;
+  const hairMat=new THREE.MeshStandardMaterial({color:hairCol,roughness:0.97});
+  if(clayGender==='female'){
+    // Long hair — main mass
+    const hairGeo=new THREE.SphereGeometry(0.72,24,20);
+    const hair=new THREE.Mesh(hairGeo,hairMat);
+    hair.position.set(0,hy+0.05,-0.06); hair.scale.set(1.01,0.9,0.9);
+    group.add(hair);
+    // Side hair strands
+    [-1,1].forEach(side=>{
+      const sGeo=new THREE.CylinderGeometry(0.14,0.08,0.7,10);
+      const s=new THREE.Mesh(sGeo,hairMat.clone());
+      s.position.set(side*0.65,hy-0.35,-0.1); s.rotation.z=side*0.15;
+      group.add(s);
+    });
+    // Hair bun or bottom
+    const bunGeo=new THREE.SphereGeometry(0.28,16,12);
+    const bun=new THREE.Mesh(bunGeo,hairMat.clone());
+    bun.position.set(0,hy-0.7,-0.22); bun.scale.set(1.2,0.5,0.7);
+    group.add(bun);
+  } else if(clayGender==='male'){
+    // Short crop
+    const hairGeo=new THREE.SphereGeometry(0.74,24,16);
+    const hair=new THREE.Mesh(hairGeo,hairMat);
+    hair.position.set(0,hy+0.36,0); hair.scale.set(1.0,0.45,0.98);
+    group.add(hair);
+    // Sideburns
+    [-1,1].forEach(side=>{
+      const sbGeo=new THREE.BoxGeometry(0.1,0.25,0.08);
+      const sb=new THREE.Mesh(sbGeo,hairMat.clone());
+      sb.position.set(side*0.68,hy+0.01,0.2);
+      group.add(sb);
+    });
+  }
+  // Round has no hair
+}
+
+function setupClayInteraction(canvas, wrap, W, H){
+  const onPunch=(clientX,clientY)=>{
+    if(clayBroken) return;
+    const rect=wrap.getBoundingClientRect();
+    const x=clientX-rect.left, y=clientY-rect.top;
+    // Show ring effect
+    const ring=document.createElement('div');
+    ring.className='punch-ring';
+    ring.style.left=x+'px'; ring.style.top=y+'px';
+    document.getElementById('clay-punch-rings').appendChild(ring);
+    setTimeout(()=>ring.remove(),500);
+    clayDoPunch(x/W*2-1, -(y/H*2-1));
+  };
+  canvas.addEventListener('click',(e)=>{
+    const r=canvas.getBoundingClientRect();
+    onPunch(e.clientX,e.clientY);
+  });
+  canvas.addEventListener('touchend',(e)=>{
+    e.preventDefault();
+    const t=e.changedTouches[0];
+    onPunch(t.clientX,t.clientY);
+  },{passive:false});
+}
+
+function clayDoPunch(ndcX, ndcY){
+  if(!clayHead||clayBroken) return;
+  const headMesh=clayHead.children[0]; // head sphere
+  if(!headMesh||!headMesh.geometry) return;
+
+  clayPunchCount++;
+  const damage=Math.random()*12+8; // 8-20 damage
+  clayHP=Math.max(0,clayHP-damage);
+  updateHPBar();
+
+  // Camera shake
+  const origPos=clayCamera.position.clone();
+  let shakes=0;
+  const shakeId=setInterval(()=>{
+    clayCamera.position.x=origPos.x+(Math.random()-.5)*0.08;
+    clayCamera.position.y=origPos.y+(Math.random()-.5)*0.06;
+    if(++shakes>6){ clearInterval(shakeId); clayCamera.position.copy(origPos); }
+  },30);
+
+  // Deform mesh vertices near punch point
+  const pos=headMesh.geometry.attributes.position;
+  const localX=ndcX*0.6, localY=ndcY*0.5;
+  const punchDepth=(clayHP<40)?0.18:0.12;
+  const punchRadius=0.45;
+  for(let i=0;i<pos.count;i++){
+    const x=pos.getX(i), y=pos.getY(i), z=pos.getZ(i);
+    if(z<-0.1) continue; // don't deform back of head much
+    const dist=Math.sqrt((x-localX)**2+(y-localY)**2);
+    if(dist<punchRadius){
+      const factor=(1-dist/punchRadius)*punchDepth;
+      const origZ=clayOrigPositions[i*3+2];
+      const newZ=Math.max(origZ-factor*1.8, z-factor);
+      pos.setZ(i,newZ);
+      // slight x/y scatter for impact crater
+      pos.setX(i,x+(x-localX)*factor*0.3+(Math.random()-.5)*factor*0.15);
+      pos.setY(i,y+(y-localY)*factor*0.2+(Math.random()-.5)*factor*0.1);
+    }
+  }
+  pos.needsUpdate=true;
+  headMesh.geometry.computeVertexNormals();
+
+  // Add cracks (thin lines as dark meshes if heavy damage)
+  if(clayHP<70 && clayPunchCount%3===0) addCrack(localX,localY);
+
+  // Spawn debris particles
+  spawnDebris(localX,localY);
+
+  // Flash text
+  const hits=['POW!','WHACK!','SMASH!','CRACK!','THUD!','BAM!'];
+  showFlash(hits[Math.floor(Math.random()*hits.length)]);
+
+  if(clayHP<=0) destroySculpt();
+}
+
+function addCrack(cx,cy){
+  const crackMat=new THREE.MeshStandardMaterial({color:0x1a0800,roughness:1,side:THREE.DoubleSide});
+  const len=Math.random()*0.4+0.15;
+  const angle=Math.random()*Math.PI;
+  const crackGeo=new THREE.PlaneGeometry(len,0.015);
+  const crack=new THREE.Mesh(crackGeo,crackMat);
+  crack.position.set(
+    cx+(Math.random()-.5)*0.2,
+    (cy+(Math.random()-.5)*0.2)+1.05, // offset for head y position
+    0.72
+  );
+  crack.rotation.z=angle;
+  clayHead.add(crack);
+}
+
+function spawnDebris(cx,cy){
+  if(!clayScene) return;
+  const count=Math.floor(Math.random()*4+2);
+  for(let i=0;i<count;i++){
+    const geo=new THREE.SphereGeometry(Math.random()*0.04+0.01,6,4);
+    const mat=new THREE.MeshStandardMaterial({color:new THREE.Color().setHSL(0.06,0.5,0.55),roughness:0.9});
+    const p=new THREE.Mesh(geo,mat);
+    p.position.set(
+      cx+(Math.random()-.5)*0.3,
+      cy+(Math.random()-.5)*0.3,
+      0.85
+    );
+    p.userData={
+      vx:(Math.random()-.5)*0.08,
+      vy:Math.random()*0.06+0.02,
+      vz:Math.random()*0.04+0.01,
+      life:1.0
+    };
+    clayScene.add(p);
+    clayParticles.push(p);
+  }
+}
+
+function updateDebris(){
+  for(let i=clayParticles.length-1;i>=0;i--){
+    const p=clayParticles[i];
+    p.userData.vy-=0.003;
+    p.position.x+=p.userData.vx;
+    p.position.y+=p.userData.vy;
+    p.position.z+=p.userData.vz;
+    p.userData.life-=0.025;
+    p.material.opacity=p.userData.life;
+    p.material.transparent=true;
+    if(p.userData.life<=0){
+      clayScene.remove(p);
+      p.geometry.dispose();
+      clayParticles.splice(i,1);
+    }
+  }
+}
+
+function showFlash(text){
+  const el=document.getElementById('clay-status-flash');
+  el.textContent=text;
+  el.style.opacity='1';
+  clearTimeout(el._t);
+  el._t=setTimeout(()=>el.style.opacity='0',500);
+}
+
+function destroySculpt(){
+  clayBroken=true;
+  // Explode the head — scatter all vertices
+  if(clayHead){
+    const mesh=clayHead.children[0];
+    if(mesh&&mesh.geometry){
+      const pos=mesh.geometry.attributes.position;
+      for(let i=0;i<pos.count;i++){
+        pos.setX(i,pos.getX(i)+(Math.random()-.5)*0.5);
+        pos.setY(i,pos.getY(i)+(Math.random()-.5)*0.6);
+        pos.setZ(i,pos.getZ(i)+(Math.random()-.5)*0.5);
+      }
+      pos.needsUpdate=true;
+    }
+    // Spawn lots of debris
+    for(let i=0;i<20;i++) spawnDebris((Math.random()-.5)*0.8,(Math.random()-.5)*0.6);
+  }
+  setTimeout(()=>{
+    document.getElementById('clay-broken-msg').classList.add('show');
+  },600);
+}
+
+function updateHPBar(){
+  const pct=Math.max(0,clayHP);
+  document.getElementById('clay-hp-fill').style.width=pct+'%';
+  document.getElementById('clay-hp-pct').textContent=Math.round(pct)+'%';
+}
+
+function bigPunch(){
+  if(clayBroken) return;
+  // 3 rapid punches
+  [0,120,240].forEach(delay=>{
+    setTimeout(()=>{
+      const x=(Math.random()-.5)*0.6;
+      const y=(Math.random()-.5)*0.4;
+      clayDoPunch(x,y);
+      // manual ring
+      const wrap=document.getElementById('clay-canvas-wrap');
+      const W=wrap.clientWidth, H=parseInt(wrap.style.height);
+      const px=(x+1)/2*W, py=(-y+1)/2*H;
+      const ring=document.createElement('div');
+      ring.className='punch-ring';
+      ring.style.left=px+'px'; ring.style.top=py+'px';
+      document.getElementById('clay-punch-rings').appendChild(ring);
+      setTimeout(()=>ring.remove(),500);
+    },delay);
+  });
+}
+
+function rotateClay(dir){
+  if(!clayHead) return;
+  const target=clayHead.rotation.y+dir*Math.PI/4;
+  const start=clayHead.rotation.y;
+  const t0=performance.now();
+  const spin=()=>{
+    const prog=Math.min((performance.now()-t0)/300,1);
+    const ease=1-Math.pow(1-prog,3);
+    clayHead.rotation.y=start+(target-start)*ease;
+    if(prog<1) requestAnimationFrame(spin);
+  };
+  spin();
+}
+
+function resetClay(){
+  if(clayAnimId){ cancelAnimationFrame(clayAnimId); clayAnimId=null; }
+  if(clayRenderer){ clayRenderer.dispose(); clayRenderer=null; }
+  clayScene=null; clayHead=null; clayOrigPositions=null;
+  clayParticles=[]; clayBroken=false; clayHP=100; clayPunchCount=0;
+  claySetupDone=false;
+  document.getElementById('clay-broken-msg').classList.remove('show');
+  document.getElementById('clay-scene').classList.add('hidden');
+  document.getElementById('clay-setup').classList.remove('hidden');
+  document.getElementById('clay-start-btn').disabled=true;
+  document.getElementById('clay-name-tag-label').textContent='???';
+  document.getElementById('clay-hp-fill').style.width='100%';
+  document.getElementById('clay-hp-pct').textContent='100%';
+  claySelectedGender=null;
+  ['male','female','round'].forEach(x=>document.getElementById('g-'+x).classList.remove('selected'));
+}
+
+let lastTime=0;
+function clayLoop(time=0){
+  if(!clayScene||!clayRenderer) return;
+  clayAnimId=requestAnimationFrame(clayLoop);
+  const dt=Math.min((time-lastTime)/1000,0.05);
+  lastTime=time;
+
+  // Auto-rotate when not broken
+  if(clayHead&&!clayBroken){
+    clayHead.rotation.y+=0.003;
+  }
+
+  updateDebris();
+  clayRenderer.render(clayScene,clayCamera);
+}
+
+
+</script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0b1120;font-family:'DM Sans',system-ui,sans-serif;color:#e2e8f0;min-height:100vh}
+:root{
+  --bg:#0b1120;--surface:#131f35;--surface2:#0f172a;--border:#1e293b;
+  --accent:#818cf8;--accent2:#a78bfa;--green:#4ade80;--yellow:#facc15;--red:#f87171;
+  --text:#e2e8f0;--muted:#94a3b8;--dim:#475569;--dimmer:#2d3f5a;
+}
+#app{display:flex;flex-direction:column;align-items:center;padding:2rem 1rem 5rem;max-width:460px;margin:0 auto}
+.card{background:var(--surface);border-radius:18px;padding:1.25rem;width:100%;box-shadow:0 4px 28px #00000055;margin-bottom:1rem}
+.tabs{display:flex;gap:3px;background:var(--surface2);border-radius:13px;padding:4px;width:100%;margin-bottom:1.1rem}
+.tab{flex:1;padding:.45rem .15rem;border:none;border-radius:10px;cursor:pointer;font-size:.71rem;font-weight:600;transition:all .2s;font-family:inherit}
+.tab.active{background:var(--accent);color:#0f172a}
+.tab.inactive{background:transparent;color:var(--dim)}
+.btn{border:none;border-radius:11px;cursor:pointer;font-family:inherit;font-weight:600;transition:all .15s}
+.btn-primary{background:var(--accent);color:#0f172a;padding:.65rem 1.2rem;font-size:.9rem}
+.btn-secondary{background:transparent;border:1px solid var(--border)!important;color:var(--dim);padding:.55rem 1rem;font-size:.85rem}
+.btn-gradient{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#0f172a;padding:.65rem 1.4rem;font-size:.9rem}
+.btn-danger{background:transparent;border:1px solid var(--red)!important;color:var(--red);padding:.5rem .9rem;font-size:.75rem}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.progress{display:flex;gap:4px;margin-bottom:.6rem}
+.progress-seg{flex:1;height:4px;border-radius:2px;transition:background .3s}
+.slider-wrap{margin-bottom:1.5rem}
+.slider-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:.4rem}
+.slider-label{font-family:'Playfair Display',serif;font-size:.95rem;color:var(--text)}
+.slider-emoji{font-size:1.6rem;transition:all .2s;min-width:2rem;text-align:right}
+input[type=range]{width:100%;appearance:none;height:6px;border-radius:3px;outline:none;cursor:pointer}
+input[type=range]::-webkit-slider-thumb{appearance:none;width:18px;height:18px;border-radius:50%;background:var(--accent);cursor:pointer;border:2px solid #0f172a;box-shadow:0 0 0 3px #818cf820}
+input[type=range]::-moz-range-thumb{width:16px;height:16px;border-radius:50%;background:var(--accent);cursor:pointer;border:2px solid #0f172a}
+.slider-hints{display:flex;justify-content:space-between;font-size:.7rem;color:var(--dim);margin-top:.2rem}
+.slider-val{color:var(--accent);font-weight:600}
+.tags-wrap{display:flex;flex-wrap:wrap;gap:.4rem;margin-bottom:1rem}
+.tag{padding:.3rem .8rem;border-radius:20px;border:1px solid var(--border);background:transparent;color:var(--dim);font-size:.78rem;cursor:pointer;transition:all .15s;font-family:inherit}
+.tag.active{border-color:var(--accent);background:#818cf820;color:var(--accent)}
+input[type=text],textarea{width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:.6rem .85rem;color:var(--text);font-size:.85rem;outline:none;font-family:inherit;resize:vertical;transition:border .2s}
+input[type=text]:focus,textarea:focus{border-color:var(--dimmer)}
+input[type=date]{background:var(--surface2);border:1px solid #1e3a6e;border-radius:8px;padding:.45rem .7rem;color:#93c5fd;font-size:.82rem;outline:none;font-family:inherit}
+#chat-messages{height:270px;overflow-y:auto;padding:1rem;scroll-behavior:smooth}
+.bubble-wrap{display:flex;margin-bottom:.8rem;animation:fadeIn .25s ease both}
+.bubble-wrap.user{justify-content:flex-end}
+.avatar{width:28px;height:28px;border-radius:50%;background:linear-gradient(135deg,var(--accent),var(--accent2));display:flex;align-items:center;justify-content:center;font-size:.75rem;margin-right:.5rem;flex-shrink:0;margin-top:2px}
+.bubble{max-width:80%;padding:.65rem .9rem;font-size:.88rem;line-height:1.55;white-space:pre-wrap}
+.bubble.ai{background:var(--border);border-radius:4px 16px 16px 16px;color:var(--text)}
+.bubble.user{background:linear-gradient(135deg,var(--accent),var(--accent2));border-radius:16px 4px 16px 16px;color:#0f172a}
+.typing-dots{display:flex;gap:5px;padding:4px 2px}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--accent);animation:bounce 1.2s ease-in-out infinite}
+.dot:nth-child(2){animation-delay:.2s}.dot:nth-child(3){animation-delay:.4s}
+.bar-row{display:flex;align-items:center;gap:.6rem;margin-bottom:.55rem}
+.bar-track{flex:3;height:5px;background:var(--border);border-radius:3px;overflow:hidden}
+.bar-fill{height:100%;background:var(--accent);border-radius:3px;transition:width .6s ease}
+.section-label{color:var(--dim);font-size:.7rem;text-transform:uppercase;letter-spacing:.09em;margin-bottom:.7rem}
+.q-label{font-family:'Playfair Display',serif;color:var(--text);font-size:1.1rem;line-height:1.5;margin-bottom:1.3rem}
+.opt-label{color:var(--muted);font-size:.78rem;text-transform:uppercase;letter-spacing:.07em;margin-bottom:.5rem;font-weight:600}
+.score-big{font-family:'Playfair Display',serif;font-size:3.8rem;font-weight:700;line-height:1}
+.score-denom{font-size:1.2rem;color:var(--dim)}
+.insight-grid{display:grid;grid-template-columns:1fr 1fr;gap:.8rem}
+.insight-tile{background:var(--surface2);border-radius:10px;padding:.85rem}
+.insight-val{font-family:'Playfair Display',serif;font-size:1.4rem;color:var(--accent);font-weight:700}
+.insight-name{font-size:.72rem;color:var(--text);margin-top:.1rem}
+.insight-sub{font-size:.65rem;color:var(--dim)}
+.journal-entry{border-left:3px solid var(--accent);padding-left:.9rem;margin-bottom:1.2rem}
+.journal-date{font-size:.72rem;color:var(--dim);letter-spacing:.06em;text-transform:uppercase;margin-bottom:.3rem}
+.journal-title{font-family:'Playfair Display',serif;font-size:1rem;color:var(--text);margin-bottom:.4rem}
+.journal-body{font-size:.85rem;color:var(--muted);line-height:1.6;white-space:pre-wrap}
+.journal-mood-badge{display:inline-flex;align-items:center;gap:.3rem;background:var(--surface2);border-radius:20px;padding:2px 8px;font-size:.72rem;color:var(--muted);margin-top:.5rem}
+.history-badges{display:flex;gap:.4rem;flex-wrap:wrap;margin-top:.5rem}
+.badge{background:var(--surface2);border-radius:6px;padding:2px 7px;font-size:.75rem;color:var(--muted)}
+.tag-badge{background:#818cf815;color:var(--accent);border-radius:10px;padding:2px 8px;font-size:.68rem}
+.privacy-banner{background:var(--surface2);border-radius:10px;padding:.5rem .9rem;display:flex;gap:.5rem;align-items:center;width:100%;margin-bottom:1rem}
+.dev-panel{width:100%;margin-top:1.5rem}
+.dev-btn{width:100%;padding:.45rem;background:transparent;border:1px dashed #1e3a6e;border-radius:8px;color:#3b6fc4;font-size:.72rem;cursor:pointer;font-family:inherit;letter-spacing:.06em}
+.dev-inner{background:#080f1e;border:1px dashed #1e3a6e;border-radius:12px;padding:1rem;margin-top:.5rem;animation:fadeIn .2s ease}
+.dev-badge{background:#0d2040;border-radius:8px;padding:.5rem .8rem;font-size:.75rem;color:#93c5fd;display:flex;align-items:center;gap:.5rem;margin-top:.7rem}
+.burnout-alert{background:#ff000015;border:1px solid var(--red);border-radius:10px;padding:.6rem .8rem;margin-bottom:1rem;font-size:.82rem;color:var(--red);line-height:1.5}
+.fade-in{animation:fadeIn .25s ease both}
+.hidden{display:none!important}
+.divider{border:none;border-top:1px solid var(--border);margin:.8rem 0}
+.w100{width:100%}
+.dev-on-badge{display:inline-flex;align-items:center;gap:.4rem;background:linear-gradient(135deg,#0d2040,#1e3a6e);border-radius:20px;padding:3px 12px;font-size:.72rem;color:#93c5fd;border:1px solid #1e3a6e;margin-top:.5rem}
+@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+@keyframes bounce{0%,60%,100%{transform:translateY(0)}30%{transform:translateY(-7px)}}
+@keyframes breatheExpand{
+  0%,100%{transform:scale(1);opacity:.7}
+  50%{transform:scale(1.65);opacity:1}
+}
+::-webkit-scrollbar{width:4px}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
+  /* ── Clay Sculpt ── */
+  #clay-canvas-wrap{width:100%;border-radius:16px;overflow:hidden;position:relative;background:radial-gradient(ellipse at 50% 30%,#1e0a3c 0%,#0d0618 100%);touch-action:none;cursor:crosshair;user-select:none}
+  #clay-canvas-wrap canvas{display:block;width:100%!important;border-radius:16px}
+  .gender-options{display:grid;grid-template-columns:1fr 1fr 1fr;gap:.6rem;margin-bottom:1.2rem}
+  .gender-opt{padding:.8rem .4rem;border-radius:12px;border:2px solid var(--border);background:transparent;color:var(--dim);font-size:.85rem;cursor:pointer;transition:all .2s;font-family:inherit;font-weight:600;text-align:center}
+  .gender-opt:hover{border-color:var(--accent);color:var(--accent)}
+  .gender-opt.selected{border-color:var(--accent);background:#818cf820;color:var(--accent)}
+  .gender-opt .g-icon{font-size:1.6rem;display:block;margin-bottom:.3rem}
+  #clay-ui-overlay{position:absolute;bottom:0;left:0;right:0;padding:.8rem 1rem;background:linear-gradient(to top,rgba(11,5,32,.85),transparent);pointer-events:none}
+  #clay-name-tag{display:inline-block;background:#c2a46b;color:#2a1a00;font-family:'Playfair Display',serif;font-size:.85rem;font-weight:700;padding:.25rem .8rem;border-radius:4px;border:2px solid #8a6a30;letter-spacing:.03em;box-shadow:2px 2px 8px #00000077;transform:rotate(-1.5deg)}
+  #clay-hp-bar{height:8px;border-radius:4px;background:var(--border);overflow:hidden;margin-bottom:.4rem}
+  #clay-hp-fill{height:100%;border-radius:4px;background:linear-gradient(to right,#f87171,#facc15,#4ade80);transition:width .3s}
+  #clay-hp-label{font-size:.7rem;color:var(--dim);margin-bottom:.3rem;display:flex;justify-content:space-between}
+  #clay-broken-msg{position:absolute;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;background:rgba(11,5,32,.8);backdrop-filter:blur(6px);border-radius:16px;gap:.8rem;z-index:5}
+  #clay-broken-msg.show{display:flex}
+  #clay-status-flash{position:absolute;top:38%;left:50%;transform:translate(-50%,-50%);font-family:'Playfair Display',serif;font-size:2rem;color:#fff;text-shadow:0 2px 16px #000;pointer-events:none;opacity:0;transition:opacity .15s;white-space:nowrap;z-index:10}
+  .punch-ring{position:absolute;border-radius:50%;border:3px solid #f87171;pointer-events:none;animation:punchRing .5s ease-out forwards;z-index:8}
+  @keyframes punchRing{0%{opacity:.9;width:10px;height:10px;margin-left:-5px;margin-top:-5px}100%{opacity:0;width:80px;height:80px;margin-left:-40px;margin-top:-40px}}
+  #clay-controls{display:flex;gap:.6rem;margin-top:.8rem;flex-wrap:wrap}
+  .clay-ctrl-btn{flex:1;padding:.5rem;border:1px solid var(--border);border-radius:10px;background:transparent;color:var(--dim);font-size:.78rem;cursor:pointer;font-family:inherit;font-weight:600;transition:all .15s;min-width:80px}
+  .clay-ctrl-btn:hover{border-color:var(--accent);color:var(--accent)}
+.modal-overlay{position:fixed;inset:0;background:#00000088;display:flex;align-items:center;justify-content:center;z-index:100;padding:1rem}
+.modal{background:var(--surface);border-radius:18px;padding:1.4rem;width:100%;max-width:420px;box-shadow:0 8px 40px #000000aa}
+.modal-title{font-family:'Playfair Display',serif;font-size:1.2rem;color:var(--text);margin-bottom:1rem}
+header{text-align:center;margin-bottom:1.5rem;width:100%}
+header h1{font-family:'Playfair Display',serif;font-size:1.9rem;letter-spacing:-.02em;margin-bottom:.2rem}
+header p{color:var(--dim);font-size:.75rem;letter-spacing:.1em;text-transform:uppercase}
+.step-counter{text-align:right;font-size:.7rem;color:var(--dim);margin-bottom:1rem}
+.empty-state{text-align:center;color:var(--dim);padding:2rem 1rem}
+.empty-state .icon{font-size:2.5rem;margin-bottom:.8rem}
+.chat-open-btn{margin-top:1rem;padding:.55rem 1.4rem;background:linear-gradient(135deg,var(--accent),var(--accent2));border:none;border-radius:20px;color:#0f172a;font-weight:700;font-size:.85rem;cursor:pointer;box-shadow:0 4px 16px #818cf840;font-family:inherit}
+.action-row{display:flex;gap:.6rem;margin-top:1rem;width:100%}
+.action-row .btn{flex:1;padding:.55rem;font-size:.75rem}
+@media(max-width:480px){#app{padding:1.2rem .8rem 5rem}}
+
+.crack-particle{position:absolute;border-radius:50%;pointer-events:none;background:#c8a882}
+@keyframes particleFly{0%{opacity:1;transform:translate(0,0) scale(1)}100%{opacity:0;transform:translate(var(--dx),var(--dy)) scale(0)}}
+@keyframes punchPop{0%{opacity:1;transform:translate(-50%,-50%) scale(1.3)}100%{opacity:0;transform:translate(-50%,-90%) scale(.7)}}
+.box-tick{font-size:.65rem;padding:3px 8px;border-radius:8px;border:1px solid var(--border);color:var(--dim);transition:all .3s;background:transparent}
+.box-tick.active{background:#818cf825;border-color:var(--accent);color:var(--accent);font-weight:700}
+#breathe-box-svg{filter:drop-shadow(0 0 12px #818cf840)}
+#breathe-circle-container{display:flex;align-items:center;justify-content:center}
+
+/* ── Loading Screen ── */
+#loading-screen{
+  position:fixed;inset:0;z-index:9999;
+  background:linear-gradient(160deg,#0d0618 0%,#1a0a3c 50%,#0d0618 100%);
+  display:flex;align-items:center;justify-content:center;
+  transition:opacity .6s ease, transform .6s ease;
+}
+#loading-screen.fade-out{opacity:0;pointer-events:none}
+#loading-inner{display:flex;flex-direction:column;align-items:center;gap:.5rem;text-align:center;padding:2rem}
+#loading-sprout{
+  font-size:4rem;
+  animation:sproutBounce 1.8s ease-in-out infinite;
+  filter:drop-shadow(0 0 20px #818cf860);
+}
+@keyframes sproutBounce{
+  0%,100%{transform:translateY(0) scale(1)}
+  40%{transform:translateY(-14px) scale(1.08)}
+  60%{transform:translateY(-8px) scale(1.04)}
+}
+#loading-title{
+  font-family:'Playfair Display',serif;
+  font-size:2.4rem;
+  background:linear-gradient(135deg,#a78bfa,#818cf8,#c4b5fd);
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+  background-clip:text;
+  letter-spacing:-.02em;
+  margin-top:.4rem;
+}
+#loading-tagline{color:var(--dim);font-size:.78rem;letter-spacing:.18em;text-transform:uppercase;margin-bottom:.8rem}
+#loading-bar-wrap{
+  width:200px;height:4px;border-radius:2px;
+  background:rgba(129,140,248,.15);
+  overflow:hidden;margin-top:.6rem;
+}
+#loading-bar-fill{
+  height:100%;width:0%;border-radius:2px;
+  background:linear-gradient(90deg,#818cf8,#a78bfa,#818cf8);
+  background-size:200% 100%;
+  animation:barShimmer 1.2s linear infinite;
+  transition:width .3s ease;
+}
+@keyframes barShimmer{0%{background-position:100% 0}100%{background-position:-100% 0}}
+#loading-tip{color:var(--dimmer);font-size:.72rem;margin-top:.6rem;max-width:220px;line-height:1.5;min-height:2em;transition:opacity .4s}
+.loading-stars{position:absolute;inset:0;pointer-events:none;overflow:hidden}
+.loading-star{position:absolute;border-radius:50%;background:#818cf8;animation:starTwinkle var(--dur,2s) ease-in-out infinite var(--delay,0s)}
+@keyframes starTwinkle{0%,100%{opacity:.1;transform:scale(.8)}50%{opacity:.5;transform:scale(1.2)}}
+
+/* ── API Key prompt in chat ── */
+#bloom-no-key-banner{
+  background:linear-gradient(135deg,#1e0a3c,#2a1050);
+  border:1px solid #818cf840;
+  border-radius:12px;
+  padding:1rem;
+  margin:.5rem;
+  text-align:center;
+}
+</style>
+</head>
+<body>
+
+<!-- ═══ LOADING SCREEN ═══ -->
+<div id="loading-screen">
+  <div id="loading-inner">
+    <div id="loading-sprout">🌱</div>
+    <div id="loading-title">MindBloom</div>
+    <div id="loading-tagline">Daily Wellness</div>
+    <div id="loading-bar-wrap">
+      <div id="loading-bar-fill"></div>
+    </div>
+    <div id="loading-tip"></div>
+  </div>
+</div>
+
+<!-- ═══ API KEY MODAL ═══ -->
+<div class="modal-overlay hidden" id="api-key-modal">
+  <div class="modal" style="max-width:400px">
+    <div style="font-size:2rem;margin-bottom:.6rem;text-align:center">✨</div>
+    <p class="modal-title" style="text-align:center;margin-bottom:.4rem">Connect Bloom</p>
+    <p style="color:var(--dim);font-size:.82rem;line-height:1.6;margin-bottom:1.2rem;text-align:center">Bloom uses Google Gemini to chat with you. Add your free Gemini API key below — it's stored only on this device.</p>
+    <div style="background:var(--surface2);border-radius:10px;padding:.8rem;margin-bottom:1rem;font-size:.78rem;color:var(--muted);line-height:1.7">
+      <strong style="color:var(--accent)">How to get a free Gemini key:</strong><br>
+      1. Go to <a href="https://aistudio.google.com/app/apikey" target="_blank" style="color:var(--accent)">aistudio.google.com/app/apikey</a><br>
+      2. Sign in with Google<br>
+      3. Click <strong style="color:var(--text)">Create API Key</strong><br>
+      4. Paste it below ↓ <span style="color:var(--green)">(free tier available!)</span>
+    </div>
+    <input type="password" id="api-key-input" placeholder="AIzaSy…" style="margin-bottom:.5rem;font-family:monospace;font-size:.82rem;letter-spacing:.04em"/>
+    <div id="api-key-error" style="color:var(--red);font-size:.75rem;min-height:1.2em;margin-bottom:.5rem"></div>
+    <div style="display:flex;gap:.6rem">
+      <button class="btn btn-secondary" onclick="closeApiKeyModal()" style="flex:1;padding:.55rem;font-size:.85rem">Skip for now</button>
+      <button class="btn btn-gradient" onclick="saveApiKey()" style="flex:1;padding:.55rem;font-size:.85rem" id="api-key-save-btn">Save Key ✓</button>
+    </div>
+    <p style="color:var(--dimmer);font-size:.68rem;text-align:center;margin-top:.8rem;line-height:1.5">Stored in localStorage on this device only.<br>Remove anytime via the 🔑 Bloom button.</p>
+  </div>
+</div>
+
+<div id="app">
+  <header>
+    <div style="font-size:2.2rem;margin-bottom:.3rem">🌱</div>
+    <h1>MindBloom</h1>
+    <p>Daily Wellness</p>
+    <div id="dev-on-badge" class="dev-on-badge hidden"></div>
+  </header>
+
+  <div class="tabs">
+    <button class="tab active"   onclick="switchTab('today')">Today</button>
+    <button class="tab inactive" onclick="switchTab('breathe')">🫧 Breathe</button>
+    <button class="tab inactive" onclick="switchTab('journal')">Journal</button>
+    <button class="tab inactive" onclick="switchTab('history')">History</button>
+    <button class="tab inactive" onclick="switchTab('clay')">🧱 Clay</button>
+  </div>
+
+  <div class="privacy-banner">
+    <span>🔒</span>
+    <span style="font-size:.7rem;color:var(--dim)">Your data stays on this device unless you choose to export it.</span>
+  </div>
+
+  <!-- ═══ TODAY ═══ -->
+  <div id="tab-today" style="width:100%">
+    <div id="checkin-flow" style="width:100%">
+      <div class="progress" id="progress-bar"></div>
+      <div class="step-counter" id="step-counter"></div>
+      <div class="card" id="step-card"></div>
+    </div>
+    <div id="summary-view" class="hidden" style="width:100%">
+      <div class="card" id="summary-score-card" style="text-align:center"></div>
+      <div class="card hidden" id="chat-card" style="padding:0;overflow:hidden">
+        <div style="padding:.75rem 1rem;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:.5rem">
+          <div style="width:9px;height:9px;border-radius:50%;background:var(--green);box-shadow:0 0 6px #4ade8099"></div>
+          <span style="font-family:'Playfair Display',serif;color:var(--text);font-size:.9rem">Bloom</span>
+          <span style="color:var(--dim);font-size:.7rem">· your wellness companion</span>
+        </div>
+        <div id="chat-messages"></div>
+        <div style="padding:.75rem;border-top:1px solid var(--border);display:flex;gap:.5rem">
+          <input type="text" id="chat-input" placeholder="Reply to Bloom…" style="flex:1" onkeydown="if(event.key==='Enter')sendChat()"/>
+          <button class="btn btn-primary" onclick="sendChat()" style="padding:.55rem 1rem;font-size:.9rem">➤</button>
+        </div>
+      </div>
+      <div class="card" id="breakdown-card"></div>
+      <div class="card hidden" id="insights-card"></div>
+    </div>
+  </div>
+
+  <!-- ═══ BREATHE ═══ -->
+  <div id="tab-breathe" class="hidden" style="width:100%">
+    <div class="card" style="display:flex;flex-direction:column;align-items:center;padding:2.5rem 1.25rem 2rem">
+      <!-- Circle breathe (calm / 4-7-8) -->
+      <div id="breathe-circle-container">
+        <div id="breathe-circle-wrap" style="position:relative;display:flex;align-items:center;justify-content:center;width:220px;height:220px;margin-bottom:2rem">
+          <div id="breathe-glow" style="position:absolute;border-radius:50%;background:radial-gradient(circle,#818cf840 0%,transparent 70%);width:220px;height:220px"></div>
+          <div id="breathe-circle" style="width:120px;height:120px;border-radius:50%;background:linear-gradient(135deg,#818cf8,#a78bfa);box-shadow:0 0 40px #818cf855;flex-shrink:0;transition:transform 0.1s linear,opacity 0.1s linear"></div>
+        </div>
+      </div>
+      <!-- Box breathe -->
+      <div id="breathe-box-container" style="display:none;margin-bottom:2rem">
+        <svg id="breathe-box-svg" width="200" height="200" viewBox="0 0 200 200">
+          <!-- Corner decorations -->
+          <circle cx="20" cy="20" r="4" fill="#818cf840"/>
+          <circle cx="180" cy="20" r="4" fill="#818cf840"/>
+          <circle cx="180" cy="180" r="4" fill="#818cf840"/>
+          <circle cx="20" cy="180" r="4" fill="#818cf840"/>
+          <!-- Square path -->
+          <rect x="20" y="20" width="160" height="160" rx="18" ry="18" fill="none" stroke="#818cf830" stroke-width="2"/>
+          <!-- Animated square path highlight -->
+          <rect id="box-path-rect" x="20" y="20" width="160" height="160" rx="18" ry="18" fill="none" stroke="#818cf8" stroke-width="3" stroke-dasharray="608" stroke-dashoffset="608" opacity="0.7"/>
+          <!-- Dot traveller -->
+          <circle id="box-dot" cx="20" cy="20" r="10" fill="#818cf8" filter="url(#glow-filter)"/>
+          <circle id="box-dot-inner" cx="20" cy="20" r="5" fill="#e0e7ff"/>
+          <defs>
+            <filter id="glow-filter" x="-50%" y="-50%" width="200%" height="200%">
+              <feGaussianBlur stdDeviation="3" result="blur"/>
+              <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+            </filter>
+          </defs>
+        </svg>
+        <!-- Phase progress ticks -->
+        <div id="box-phase-ticks" style="display:flex;justify-content:center;gap:6px;margin-top:4px">
+          <div class="box-tick" data-phase="0">Inhale</div>
+          <div class="box-tick" data-phase="1">Hold</div>
+          <div class="box-tick" data-phase="2">Exhale</div>
+          <div class="box-tick" data-phase="3">Hold</div>
+        </div>
+      </div>
+      <p id="breathe-phase" style="font-family:'Playfair Display',serif;font-size:1.1rem;color:var(--accent);margin-bottom:.6rem;letter-spacing:.04em;min-height:1.5em;text-align:center"></p>
+      <p id="breathe-sub" style="color:var(--dim);font-size:.88rem;text-align:center;line-height:1.6">breathe with the circle.</p>
+      <div style="display:flex;gap:.6rem;margin-top:1.8rem;flex-wrap:wrap;justify-content:center">
+        <button class="btn btn-secondary" onclick="setBreathePattern('box')" id="bp-box" style="font-size:.75rem;padding:.4rem .9rem">Box (4-4-4-4)</button>
+        <button class="btn btn-secondary" onclick="setBreathePattern('478')" id="bp-478" style="font-size:.75rem;padding:.4rem .9rem">4-7-8</button>
+        <button class="btn btn-secondary" onclick="setBreathePattern('calm')" id="bp-calm" style="font-size:.75rem;padding:.4rem .9rem">Calm (4-6)</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ JOURNAL ═══ -->
+  <div id="tab-journal" class="hidden" style="width:100%">
+    <div class="card">
+      <p class="section-label" style="margin-bottom:.8rem">New Journal Entry</p>
+      <input type="text" id="journal-title-input" placeholder="Title (optional)" style="margin-bottom:.7rem"/>
+      <textarea id="journal-body-input" rows="6" placeholder="What's on your mind? Write freely — this is just for you…" style="margin-bottom:.7rem;line-height:1.6"></textarea>
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <span style="font-size:.75rem;color:var(--dim)" id="journal-date-label"></span>
+        <button class="btn btn-gradient" onclick="saveJournalEntry()" style="padding:.55rem 1.2rem;font-size:.85rem">Save Entry ✓</button>
+      </div>
+    </div>
+    <div id="journal-list"></div>
+  </div>
+
+  <!-- ═══ HISTORY ═══ -->
+  <div id="tab-history" class="hidden" style="width:100%">
+    <div id="history-list"></div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════
+       TAB: CLAY SCULPT
+  ══════════════════════════════════════════════════ -->
+  <div id="tab-clay" class="hidden" style="width:100%">
+    <!-- Setup screen -->
+    <div id="clay-setup" style="width:100%">
+      <div class="card">
+        <p class="q-label" style="margin-bottom:.8rem">🧱 Create your stress sculpt</p>
+        <p style="color:var(--dim);font-size:.82rem;margin-bottom:1.2rem;line-height:1.5">Model a clay head, give it a name, then punch it until it breaks. Surprisingly satisfying stress relief.</p>
+        <p class="opt-label" style="margin-bottom:.6rem">Choose a head shape</p>
+        <div class="gender-options">
+          <button class="gender-opt" onclick="selectClayGender('male')" id="g-male"><span class="g-icon">👨</span>Male</button>
+          <button class="gender-opt" onclick="selectClayGender('female')" id="g-female"><span class="g-icon">👩</span>Female</button>
+          <button class="gender-opt" onclick="selectClayGender('round')" id="g-round"><span class="g-icon">🫥</span>Round</button>
+        </div>
+        <p class="opt-label" style="margin-bottom:.5rem">Name it <span style="color:var(--dimmer);font-weight:400">(optional)</span></p>
+        <input type="text" id="clay-name-input" maxlength="20" placeholder="Who&#39;s stressing you out?" style="margin-bottom:1.2rem"/>
+        <button class="btn btn-gradient" onclick="startClaySculpt()" id="clay-start-btn" style="width:100%;padding:.7rem;font-size:.95rem" disabled>
+          Sculpt &amp; Destroy →
+        </button>
+      </div>
+    </div>
+    <!-- Sculpt canvas -->
+    <div id="clay-scene" class="hidden" style="width:100%">
+      <div id="clay-canvas-wrap">
+        <canvas id="clay-canvas"></canvas>
+        <div id="clay-punch-rings" style="position:absolute;inset:0;pointer-events:none;overflow:hidden;border-radius:16px"></div>
+        <div id="clay-broken-msg">
+          <div style="font-size:3rem">💥</div>
+          <p style="font-family:'Playfair Display',serif;font-size:1.3rem;color:var(--text)">Completely destroyed.</p>
+          <p style="font-size:.85rem;color:var(--muted)">Hope that felt good 😤</p>
+          <button class="btn btn-gradient" onclick="resetClay()" style="padding:.6rem 1.4rem;font-size:.88rem;pointer-events:all">Make another one</button>
+        </div>
+        <div id="clay-status-flash"></div>
+        <div id="clay-ui-overlay">
+          <div id="clay-hp-label"><span id="clay-name-tag-label" style="font-weight:700">???</span><span id="clay-hp-pct">100%</span></div>
+          <div id="clay-hp-bar"><div id="clay-hp-fill" style="width:100%"></div></div>
+        </div>
+      </div>
+      <p style="font-size:.75rem;color:var(--dim);text-align:center;margin:.5rem 0 .3rem">Tap or click the head to punch it</p>
+      <div id="clay-controls">
+        <button class="clay-ctrl-btn" onclick="rotateClay(-1)">↺ Rotate</button>
+        <button class="clay-ctrl-btn" onclick="bigPunch()">👊 Big Punch</button>
+        <button class="clay-ctrl-btn" onclick="rotateClay(1)">↻ Rotate</button>
+        <button class="clay-ctrl-btn" onclick="resetClay()">🔄 New Sculpt</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="action-row">
+    <button class="btn btn-secondary" onclick="exportData()" style="flex:1;padding:.55rem;font-size:.75rem">⬇ Export</button>
+    <button class="btn btn-secondary" onclick="triggerImport()" style="flex:1;padding:.55rem;font-size:.75rem">⬆ Import</button>
+    <button class="btn btn-secondary" onclick="openApiKeyModal()" style="flex:1;padding:.55rem;font-size:.75rem">🔑 Bloom</button>
+    <button class="btn btn-danger" onclick="clearAllData()" style="flex:1;padding:.55rem;font-size:.75rem">🗑 Clear</button>
+  </div>
+  <input type="file" id="import-file-input" accept=".json" style="display:none" onchange="handleImportFile(event)"/>
+
+  <div class="dev-panel">
+    <button class="dev-btn" onclick="toggleDevPanel()" id="dev-toggle-btn">🛠 Open Developer Panel</button>
+    <div id="dev-inner" class="dev-inner hidden">
+      <p style="color:#3b6fc4;font-size:.72rem;text-transform:uppercase;letter-spacing:.1em;font-weight:700;margin-bottom:.4rem">🛠 Developer · Date Override</p>
+      <p style="color:#3b5a9e;font-size:.72rem;line-height:1.5;margin-bottom:.8rem">Set a custom date — the app acts as if that's today.</p>
+      <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
+        <input type="date" id="dev-date-input"/>
+        <button class="btn" onclick="applyDevDate()" style="padding:.45rem .9rem;background:#1e3a6e;border:none;border-radius:8px;color:#93c5fd;font-size:.8rem;font-weight:600">Apply</button>
+        <button class="btn" onclick="clearDevDate()" id="dev-clear-btn" style="padding:.45rem .7rem;background:transparent;border:1px solid var(--red);border-radius:8px;color:var(--red);font-size:.8rem">✕ Reset</button>
+      </div>
+      <div id="dev-active-badge" class="dev-badge hidden"></div>
+    </div>
+  </div>
+
+  <p style="color:#1a2540;font-size:.62rem;margin-top:1.5rem;text-align:center">MindBloom v4 · All data stored locally on this device</p>
+</div>
+
+<!-- IMPORT MODAL -->
+<div class="modal-overlay hidden" id="import-modal">
+  <div class="modal">
+    <p class="modal-title">⬆ Import Data</p>
+    <div id="import-preview" style="margin-bottom:1rem;font-size:.82rem;color:var(--muted);line-height:1.6"></div>
+    <div style="background:var(--surface2);border-radius:10px;padding:.7rem .9rem;margin-bottom:1rem;font-size:.75rem;color:var(--dim)">
+      <strong style="color:var(--yellow)">⚠ Merge mode:</strong> New entries will be added. Existing entries for the same date will be overwritten.
+    </div>
+    <div style="display:flex;gap:.6rem;justify-content:flex-end">
+      <button class="btn btn-secondary" onclick="closeImportModal()" style="padding:.5rem 1rem;font-size:.85rem">Cancel</button>
+      <button class="btn btn-gradient" onclick="confirmImport()" style="padding:.5rem 1.2rem;font-size:.85rem" id="import-confirm-btn">Import ✓</button>
+    </div>
+  </div>
+</div>
+<div class="modal-overlay hidden" id="journal-modal">
+  <div class="modal">
+    <p class="modal-title">Edit Journal Entry</p>
+    <input type="text" id="modal-title-input" placeholder="Title (optional)" style="margin-bottom:.7rem"/>
+    <textarea id="modal-body-input" rows="6" style="margin-bottom:1rem;line-height:1.6"></textarea>
+    <div style="display:flex;gap:.6rem;justify-content:flex-end">
+      <button class="btn btn-secondary" onclick="closeJournalModal()" style="padding:.5rem 1rem;font-size:.85rem">Cancel</button>
+      <button class="btn btn-gradient" onclick="saveJournalEdit()" style="padding:.5rem 1.2rem;font-size:.85rem">Save</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════
+// STORAGE
+// ═══════════════════════════════════════════════════
+const LS={
+  getEntries:()=>{try{return JSON.parse(localStorage.getItem('mindbloom_entries')||'[]')}catch{return[]}},
+  setEntries:(v)=>localStorage.setItem('mindbloom_entries',JSON.stringify(v)),
+  getJournal:()=>{try{return JSON.parse(localStorage.getItem('mindbloom_journal')||'[]')}catch{return[]}},
+  setJournal:(v)=>localStorage.setItem('mindbloom_journal',JSON.stringify(v)),
+  getDevDate:()=>localStorage.getItem('mindbloom_devdate')||null,
+  setDevDate:(v)=>v?localStorage.setItem('mindbloom_devdate',v):localStorage.removeItem('mindbloom_devdate'),
+};
+let entries=LS.getEntries(), journalEntries=LS.getJournal(), devDate=LS.getDevDate();
+let currentTab='today', survey={mood:5,stress:5,energy:5,sleep:5,social:5,tags:[],word:'',note:''};
+let currentStep=1; const TOTAL_STEPS=6;
+let chatMessages=[],chatSystemPrompt='',chatTyping=false, editingJournalId=null;
+
+// ═══════════════════════════════════════════════════
+// HELPERS
+// ═══════════════════════════════════════════════════
+const activeDate=()=>devDate||new Date().toISOString().slice(0,10);
+const todayEntry=()=>entries.find(e=>e.date===activeDate())||null;
+const std=(arr)=>{if(arr.length<2)return 0;const m=arr.reduce((a,b)=>a+b,0)/arr.length;return Math.sqrt(arr.reduce((a,b)=>a+(b-m)**2,0)/arr.length)};
+const correlation=(xs,ys)=>{const n=xs.length;if(n<2)return null;const mx=xs.reduce((a,b)=>a+b,0)/n,my=ys.reduce((a,b)=>a+b,0)/n;const num=xs.reduce((s,x,i)=>s+(x-mx)*(ys[i]-my),0);const den=Math.sqrt(xs.reduce((s,x)=>s+(x-mx)**2,0)*ys.reduce((s,y)=>s+(y-my)**2,0));return den?(num/den).toFixed(2):null};
+const wellnessScore=(e)=>Math.max(1,Math.min(10,+((e.mood+e.energy+e.sleep+e.social-e.stress)/5).toFixed(1)));
+const burnoutRisk=()=>{if(entries.length<3)return false;return entries.slice(-3).every(e=>e.stress>=7&&e.sleep<=4&&e.energy<=4)};
+const moodEmoji=(v)=>["😭","😢","😟","😕","😐","🙂","😊","😀","🤩","🌟"][Math.min(9,Math.max(0,v-1))];
+const scoreColor=(s)=>s>=7?'var(--green)':s>=5?'var(--yellow)':'var(--red)';
+const TAGS=["School","Work","Family","Friends","Health","Personal goals","Other"];
+const sliderBg=(v)=>`linear-gradient(to right,#818cf8 0%,#818cf8 ${(v-1)/9*100}%,#1e293b ${(v-1)/9*100}%,#1e293b 100%)`;
+const esc=(s)=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+const formatDate=(d)=>{const[y,m,day]=d.split('-');return `${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][+m-1]} ${+day}, ${y}`};
+
+// ═══════════════════════════════════════════════════
+// TABS
+// ═══════════════════════════════════════════════════
+function switchTab(tab){
+  currentTab=tab;
+  ['today','breathe','journal','history','clay'].forEach(t=>{
+    const el=document.getElementById('tab-'+t);
+    if(el) el.classList.toggle('hidden',t!==tab);
+  });
+  document.querySelectorAll('.tab').forEach((el,i)=>{
+    const tabs=['today','breathe','journal','history','clay'];
+    el.classList.toggle('active',tabs[i]===tab);
+    el.classList.toggle('inactive',tabs[i]!==tab);
+  });
+  if(tab==='journal')renderJournal();
+  if(tab==='history')renderHistory();
+  if(tab==='clay')initClayTab();
+  if(tab==='breathe')initBreathe();
+}
+
+// ═══════════════════════════════════════════════════
+// SURVEY
+// ═══════════════════════════════════════════════════
+const STEPS_CONFIG=[
+  {key:'mood',label:'How was your overall mood today?',low:'Very Low',high:'Excellent',emoji:(v)=>moodEmoji(v)},
+  {key:'stress',label:'How stressed did you feel today?',low:'Not stressed',high:'Extremely stressed',emoji:(v)=>["😌","😌","😌","😐","😬","😬","😰","😰","🤯","🤯"][v-1]},
+  {key:'energy',label:'How was your energy level today?',low:'Exhausted',high:'Very energized',emoji:(v)=>["🪫","🪫","😴","😴","😐","😐","⚡","⚡","🔥","🔥"][v-1]},
+  {key:'sleep',label:'How well did you sleep last night?',low:'Terrible',high:'Great',emoji:(v)=>["😫","😫","😪","😪","😶","😶","😴","😴","💤","💤"][v-1]},
+  {key:'social',label:'Did you feel supported or connected today?',low:'Very alone',high:'Very supported',emoji:(v)=>["😔","😔","😶","😶","🙂","🙂","🤝","🤝","🫂","🫂"][v-1]},
+];
+
+function renderStep(){
+  const bar=document.getElementById('progress-bar');
+  bar.innerHTML=Array.from({length:TOTAL_STEPS},(_,i)=>`<div class="progress-seg" style="background:${i<currentStep?'var(--accent)':'var(--border)'}"></div>`).join('');
+  document.getElementById('step-counter').textContent=currentStep<TOTAL_STEPS?`Question ${currentStep} of ${TOTAL_STEPS-1}`:'Optional extras';
+  const card=document.getElementById('step-card');
+  if(currentStep<=5){
+    const cfg=STEPS_CONFIG[currentStep-1],val=survey[cfg.key];
+    card.innerHTML=`<p class="q-label">${esc(cfg.label)}</p>
+      <div class="slider-wrap">
+        <div class="slider-row"><span class="slider-label">${cfg.key.charAt(0).toUpperCase()+cfg.key.slice(1)}</span><span class="slider-emoji" id="sl-emoji">${cfg.emoji(val)}</span></div>
+        <input type="range" min="1" max="10" value="${val}" style="background:${sliderBg(val)}" oninput="updateSlider('${cfg.key}',this.value,this.style,'${currentStep}')"/>
+        <div class="slider-hints"><span>${esc(cfg.low)}</span><span class="slider-val" id="sl-val">${val}/10</span><span>${esc(cfg.high)}</span></div>
+      </div>
+      <div style="display:flex;gap:.8rem;margin-top:1rem">
+        ${currentStep>1?`<button class="btn btn-secondary w100" onclick="prevStep()">← Back</button>`:''}
+        <button class="btn btn-primary w100" onclick="nextStep()">Next →</button>
+      </div>`;
+  }else{
+    const tagHtml=TAGS.map(t=>`<button class="tag ${survey.tags.includes(t)?'active':''}" onclick="toggleTag('${t}')">${esc(t)}</button>`).join('');
+    card.innerHTML=`<p class="q-label">Almost done! 🌿</p>
+      <p class="opt-label">What influenced today? <span style="color:var(--dimmer);font-weight:400">(optional)</span></p>
+      <div class="tags-wrap">${tagHtml}</div>
+      <input type="text" maxlength="20" placeholder="One word to describe today… (optional)" value="${esc(survey.word)}" oninput="survey.word=this.value" style="margin-bottom:.8rem"/>
+      <p class="opt-label">Anything else you want to add? <span style="color:var(--dimmer);font-weight:400">(optional)</span></p>
+      <p style="color:var(--dimmer);font-size:.72rem;margin-bottom:.5rem">Bloom will read this 💬</p>
+      <textarea id="note-input" rows="3" placeholder="Share whatever's on your mind…">${esc(survey.note)}</textarea>
+      <div style="display:flex;gap:.8rem;margin-top:1.1rem">
+        <button class="btn btn-secondary w100" onclick="prevStep()">← Back</button>
+        <button class="btn w100" style="background:linear-gradient(135deg,var(--accent),var(--accent2));color:#0f172a;font-weight:700;font-size:.9rem" onclick="submitSurvey()">Submit ✓</button>
+      </div>`;
+    setTimeout(()=>{const ni=document.getElementById('note-input');if(ni){ni.value=survey.note;ni.oninput=()=>survey.note=ni.value}},0);
+  }
+}
+
+function updateSlider(key,val,style,step){survey[key]=+val;style.background=sliderBg(+val);const cfg=STEPS_CONFIG[+step-1];const e=document.getElementById('sl-emoji'),v=document.getElementById('sl-val');if(e)e.textContent=cfg.emoji(+val);if(v)v.textContent=`${val}/10`}
+function toggleTag(t){if(survey.tags.includes(t))survey.tags=survey.tags.filter(x=>x!==t);else survey.tags.push(t);document.querySelectorAll('.tag').forEach(el=>el.classList.toggle('active',survey.tags.includes(el.textContent)))}
+function nextStep(){if(currentStep<TOTAL_STEPS){currentStep++;renderStep()}}
+function prevStep(){if(currentStep>1){currentStep--;renderStep()}}
+function submitSurvey(){const ni=document.getElementById('note-input');if(ni)survey.note=ni.value;const entry={date:activeDate(),mood:survey.mood,stress:survey.stress,energy:survey.energy,sleep:survey.sleep,social:survey.social,tags:[...survey.tags],word:survey.word,note:survey.note,ts:Date.now()};entries=[...entries.filter(e=>e.date!==activeDate()),entry].sort((a,b)=>a.ts-b.ts);LS.setEntries(entries);showSummary(entry,true)}
+
+// ═══════════════════════════════════════════════════
+// SUMMARY
+// ═══════════════════════════════════════════════════
+function showSummary(entry,openChat){
+  document.getElementById('checkin-flow').classList.add('hidden');
+  document.getElementById('summary-view').classList.remove('hidden');
+  const ws=wellnessScore(entry),risk=burnoutRisk();
+  document.getElementById('summary-score-card').innerHTML=`
+    ${risk?`<div class="burnout-alert">⚠️ <strong>Burnout risk detected</strong> — 3 tough days in a row. Be gentle with yourself.</div>`:''}
+    <p class="section-label" style="margin-bottom:.4rem">${activeDate()===new Date().toISOString().slice(0,10)?"Today's":formatDate(activeDate())+" ·"} Wellness Score</p>
+    <div class="score-big" style="color:${scoreColor(ws)}">${ws}<span class="score-denom">/10</span></div>
+    <div style="font-size:2.2rem;margin-top:.4rem">${moodEmoji(entry.mood)}</div>
+    ${entry.word?`<p style="color:var(--accent);font-style:italic;margin-top:.4rem;font-size:.9rem">"${esc(entry.word)}"</p>`:''}
+    <button class="chat-open-btn" id="chat-open-btn" onclick="openChat()">💬 Chat with Bloom</button>`;
+  const bars=[['Mood',entry.mood,'😊'],['Stress',entry.stress,'😬'],['Energy',entry.energy,'⚡'],['Sleep',entry.sleep,'💤'],['Social',entry.social,'🤝']].map(([l,v,e])=>`<div class="bar-row"><span style="width:20px;text-align:center">${e}</span><span style="flex:1;font-size:.8rem;color:var(--muted)">${l}</span><div class="bar-track"><div class="bar-fill" style="width:${v*10}%"></div></div><span style="width:24px;text-align:right;font-size:.8rem;color:var(--accent);font-weight:600">${v}</span></div>`).join('');
+  const th=entry.tags?.length?`<hr class="divider"/><p class="section-label">Influences</p><div style="display:flex;flex-wrap:wrap;gap:4px">${entry.tags.map(t=>`<span class="tag-badge">${esc(t)}</span>`).join('')}</div>`:'';
+  const nh=entry.note?`<hr class="divider"/><p class="section-label">Your Note</p><p style="color:var(--muted);font-size:.82rem;line-height:1.55;font-style:italic">"${esc(entry.note)}"</p>`:'';
+  document.getElementById('breakdown-card').innerHTML=`<p class="section-label">Today's Breakdown</p>${bars}${th}${nh}`;
+  if(entries.length>1){const v=std(entries.slice(-7).map(e=>e.mood)).toFixed(2),c=correlation(entries.map(e=>e.stress),entries.map(e=>e.sleep));const ic=document.getElementById('insights-card');ic.classList.remove('hidden');ic.innerHTML=`<p class="section-label">Insights</p><div class="insight-grid"><div class="insight-tile"><div class="insight-val">${v}σ</div><div class="insight-name">Mood Volatility</div><div class="insight-sub">last 7 days</div></div><div class="insight-tile"><div class="insight-val">${c||'—'}</div><div class="insight-name">Stress↔Sleep</div><div class="insight-sub">correlation</div></div><div class="insight-tile"><div class="insight-val">${entries.length}</div><div class="insight-name">Days Tracked</div><div class="insight-sub">total entries</div></div></div>`}
+  if(openChat)setTimeout(()=>openChatPanel(entry),400);
+}
+
+// ═══════════════════════════════════════════════════
+// AI CHAT — powered by Google Gemini
+// ═══════════════════════════════════════════════════
+
+// Build a rich context string Bloom sees before saying anything
+function buildBloomContext(e){
+  const ws=wellnessScore(e);
+  const risk=burnoutRisk();
+  const last3=entries.slice(-3).map(x=>wellnessScore(x));
+  const trend=entries.length>=3
+    ?(last3[2]>last3[0]+.5?'improving':last3[2]<last3[0]-.5?'declining':'stable')
+    :'unknown';
+
+  // Determine opening tone
+  let opener='';
+  if(risk){
+    opener='BURNOUT_RISK: True — user has had 3+ days of high stress, low sleep, and low energy. You MUST open by gently but clearly telling them you\'ve noticed they\'ve been running on empty and they really need to take a real break — not tomorrow, now. Be warm but direct. Suggest something specific: sleep early, do nothing tonight, cancel one thing this week.';
+  } else if(ws<=3){
+    opener='OPENER_TONE: rough_day — open with "Sounds like today was really tough" or similar. Lead with empathy, not advice.';
+  } else if(ws<=5){
+    opener='OPENER_TONE: mixed_day — acknowledge the ups and downs. Something like "Today had its moments, huh?"';
+  } else if(ws>=8){
+    opener='OPENER_TONE: great_day — open with genuine excitement! "Okay that score is looking really good!" or "That\'s a solid day right there 🔥"';
+  } else {
+    opener='OPENER_TONE: decent_day — something warm like "Not a bad day overall!" or "Seems like things were alright today 🙂"';
+  }
+
+  return `You are Bloom — a warm, emotionally intelligent wellness companion. You speak like a caring older friend: real, casual, never robotic or preachy.
+
+${opener}
+
+TODAY'S CHECK-IN DATA (you have full visibility into this):
+• Wellness score: ${ws}/10
+• Mood: ${e.mood}/10  |  Stress: ${e.stress}/10  |  Energy: ${e.energy}/10
+• Sleep quality: ${e.sleep}/10  |  Social connection: ${e.social}/10
+• Tags (what influenced today): ${e.tags?.join(', ')||'none selected'}
+• Their word for today: "${e.word||'—'}"
+• Their personal note: "${e.note||'(nothing written)'}"
+• Burnout risk: ${risk?'⚠️ YES — 3 consecutive tough days detected':'No'}
+• Trend (last 3 days): ${trend}
+• Total days tracked: ${entries.length}
+
+RULES:
+1. Your FIRST message must reference the actual data above — never be generic.
+2. If burnout risk is true, always weave in a clear, caring "please rest" message.
+3. Keep first message to 2-4 sentences. Warm, specific, human.
+4. Ask ONE follow-up question max per reply.
+5. Never say "I understand" or "That's great!" — show you understand by being specific.
+6. Match energy: low score → soft comfort first; high score → celebrate with them.
+7. If they mention something in their note, respond to THAT directly.
+8. No bullet points. No headers. Just real conversation.`;
+}
+
+// ── Gemini API call ─────────────────────────────────────────────────
+const GEMINI_MODEL='gemini-2.0-flash';
+const GEMINI_URL=(key)=>`https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${key}`;
+
+async function callBloom(history, systemCtx){
+  const key=getApiKey();
+  if(!key) return null;
+
+  // Convert chat history to Gemini format
+  // history = [{role:'user'|'assistant', content:'...'}]
+  // Gemini uses role 'user' and 'model'
+  const contents=history.map(m=>({
+    role: m.role==='assistant'?'model':'user',
+    parts:[{text:m.content}]
+  }));
+
+  // If no history yet (opening message), send a trigger
+  if(!contents.length){
+    contents.push({role:'user', parts:[{text:'[START] Please greet me based on my check-in data.'}]});
+  }
+
+  const payload={
+    system_instruction:{parts:[{text:systemCtx}]},
+    contents,
+    generationConfig:{maxOutputTokens:400,temperature:0.85,topP:0.95}
+  };
+
+  try{
+    const r=await fetch(GEMINI_URL(key),{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(payload)
+    });
+    if(!r.ok){
+      if(r.status===400||r.status===403) return '__INVALID_KEY__';
+      return "Having a little trouble connecting right now 💙";
+    }
+    const d=await r.json();
+    const text=d.candidates?.[0]?.content?.parts?.[0]?.text;
+    return text||"I'm here for you 💙";
+  }catch{
+    return "Having trouble connecting right now, but I'm here for you 💙";
+  }
+}
+
+function openChat(){const e=todayEntry();if(e)openChatPanel(e)}
+
+function showBloomBanner(type){
+  const msgs=document.getElementById('chat-messages');
+  if(!msgs)return;
+  if(type==='no-key'){
+    msgs.innerHTML=`<div id="bloom-no-key-banner">
+      <div style="font-size:1.8rem;margin-bottom:.5rem">✨</div>
+      <p style="font-family:'Playfair Display',serif;color:var(--text);margin-bottom:.5rem">Connect Bloom</p>
+      <p style="font-size:.8rem;color:var(--dim);line-height:1.65;margin-bottom:1rem">
+        Bloom runs on <strong style="color:var(--text)">Google Gemini</strong> — free to use with a Google account.<br><br>
+        Add your free API key to start chatting.
+      </p>
+      <button class="btn btn-gradient" onclick="openApiKeyModal()" style="padding:.5rem 1.3rem;font-size:.85rem">Add Gemini Key →</button>
+      <p style="font-size:.68rem;color:var(--dimmer);margin-top:.7rem">Free key at <a href="https://aistudio.google.com/app/apikey" target="_blank" style="color:var(--accent)">aistudio.google.com/app/apikey</a></p>
+    </div>`;
+  } else if(type==='invalid-key'){
+    msgs.innerHTML=`<div id="bloom-no-key-banner">
+      <div style="font-size:1.8rem;margin-bottom:.5rem">🔑</div>
+      <p style="font-family:'Playfair Display',serif;color:var(--red);margin-bottom:.4rem">Invalid API Key</p>
+      <p style="font-size:.8rem;color:var(--dim);line-height:1.6;margin-bottom:.9rem">Gemini rejected your key. Double-check it and try again.</p>
+      <button class="btn btn-gradient" onclick="openApiKeyModal()" style="padding:.5rem 1.2rem;font-size:.85rem">Update Key →</button>
+    </div>`;
+  }
+}
+
+async function openChatPanel(e){
+  const card=document.getElementById('chat-card'),btn=document.getElementById('chat-open-btn');
+  if(btn)btn.style.display='none';
+  card.classList.remove('hidden');
+  chatMessages=[];
+  chatSystemPrompt=buildBloomContext(e);
+  document.getElementById('chat-messages').innerHTML='';
+
+  appendTyping();
+  const r=await callBloom([],chatSystemPrompt);
+  removeTyping();
+
+  if(r===null){showBloomBanner('no-key');return;}
+  if(r==='__INVALID_KEY__'){showBloomBanner('invalid-key');return;}
+  chatMessages.push({role:'assistant',content:r});
+  appendBubble('assistant',r);
+}
+
+async function sendChat(){
+  const inp=document.getElementById('chat-input'),text=inp.value.trim();
+  if(!text||chatTyping)return;
+  inp.value='';
+  chatMessages.push({role:'user',content:text});
+  appendBubble('user',text);
+  chatTyping=true;appendTyping();
+  const r=await callBloom(chatMessages,chatSystemPrompt);
+  removeTyping();chatTyping=false;
+  if(r===null){showBloomBanner('no-key');return;}
+  if(r==='__INVALID_KEY__'){showBloomBanner('invalid-key');return;}
+  chatMessages.push({role:'assistant',content:r});
+  appendBubble('assistant',r);
+}
+function appendBubble(role,text){const msgs=document.getElementById('chat-messages'),isAI=role==='assistant',div=document.createElement('div');div.className=`bubble-wrap ${isAI?'':'user'} fade-in`;div.innerHTML=isAI?`<div class="avatar">🌱</div><div class="bubble ai">${esc(text)}</div>`:`<div class="bubble user">${esc(text)}</div>`;msgs.appendChild(div);msgs.scrollTop=msgs.scrollHeight}
+function appendTyping(){const msgs=document.getElementById('chat-messages'),div=document.createElement('div');div.className='bubble-wrap';div.id='typing-indicator';div.innerHTML=`<div class="avatar">🌱</div><div class="bubble ai"><div class="typing-dots"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div></div>`;msgs.appendChild(div);msgs.scrollTop=msgs.scrollHeight}
+function removeTyping(){const t=document.getElementById('typing-indicator');if(t)t.remove()}
+
+// ═══════════════════════════════════════════════════
+// JOURNAL
+// ═══════════════════════════════════════════════════
+function saveJournalEntry(){const ti=document.getElementById('journal-title-input'),bi=document.getElementById('journal-body-input'),body=bi.value.trim();if(!body){bi.style.borderColor='var(--red)';setTimeout(()=>bi.style.borderColor='',1500);return}journalEntries=[{id:Date.now().toString(),date:activeDate(),title:ti.value.trim(),body,ts:Date.now(),linkedWellness:todayEntry()?wellnessScore(todayEntry()):null,linkedMood:todayEntry()?todayEntry().mood:null},...journalEntries];LS.setJournal(journalEntries);ti.value='';bi.value='';renderJournal()}
+function deleteJournalEntry(id){if(!confirm('Delete this journal entry?'))return;journalEntries=journalEntries.filter(e=>e.id!==id);LS.setJournal(journalEntries);renderJournal()}
+function openEditModal(id){const e=journalEntries.find(x=>x.id===id);if(!e)return;editingJournalId=id;document.getElementById('modal-title-input').value=e.title||'';document.getElementById('modal-body-input').value=e.body||'';document.getElementById('journal-modal').classList.remove('hidden')}
+function closeJournalModal(){document.getElementById('journal-modal').classList.add('hidden');editingJournalId=null}
+function saveJournalEdit(){if(!editingJournalId)return;const t=document.getElementById('modal-title-input').value.trim(),b=document.getElementById('modal-body-input').value.trim();if(!b)return;journalEntries=journalEntries.map(e=>e.id===editingJournalId?{...e,title:t,body:b}:e);LS.setJournal(journalEntries);closeJournalModal();renderJournal()}
+function renderJournal(){const l=document.getElementById('journal-date-label');if(l)l.textContent=formatDate(activeDate());const list=document.getElementById('journal-list');if(!list)return;if(!journalEntries.length){list.innerHTML=`<div class="empty-state"><div class="icon">📓</div><p>No journal entries yet.</p><p style="font-size:.8rem;margin-top:.4rem">Write your first one above!</p></div>`;return}list.innerHTML=journalEntries.map(e=>`<div class="card fade-in"><div class="journal-entry"><div class="journal-date">${formatDate(e.date)}</div>${e.title?`<div class="journal-title">${esc(e.title)}</div>`:''}<div class="journal-body">${esc(e.body)}</div>${e.linkedWellness?`<div class="journal-mood-badge">${moodEmoji(e.linkedMood||5)} Wellness ${e.linkedWellness}/10 that day</div>`:''}</div><div style="display:flex;gap:.5rem;margin-top:.8rem;justify-content:flex-end"><button class="btn btn-secondary" onclick="openEditModal('${esc(e.id)}')" style="padding:.35rem .8rem;font-size:.75rem">✏️ Edit</button><button class="btn btn-danger" onclick="deleteJournalEntry('${esc(e.id)}')" style="padding:.35rem .8rem;font-size:.75rem">🗑</button></div></div>`).join('')}
+
+// ═══════════════════════════════════════════════════
+// HISTORY
+// ═══════════════════════════════════════════════════
+function renderHistory(){const list=document.getElementById('history-list');if(!entries.length){list.innerHTML=`<div class="empty-state"><div class="icon">📅</div><p>No check-ins yet.</p></div>`;return}list.innerHTML=entries.slice().reverse().map(e=>{const ws=wellnessScore(e),th=e.tags?.length?`<div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:.5rem">${e.tags.map(t=>`<span class="tag-badge">${esc(t)}</span>`).join('')}</div>`:'',nh=e.note?`<p style="color:var(--dim);font-size:.75rem;margin-top:.5rem;font-style:italic">"${esc(e.note)}"</p>`:'';return`<div class="card fade-in"><div style="display:flex;justify-content:space-between;align-items:center"><span style="font-family:'Playfair Display',serif;color:var(--text);font-size:.9rem">${formatDate(e.date)}</span><div style="display:flex;align-items:center;gap:.5rem">${e.word?`<span style="color:var(--dim);font-size:.75rem;font-style:italic">"${esc(e.word)}"</span>`:''}<span style="font-weight:700;color:${scoreColor(ws)};font-size:1rem">${ws}/10</span></div></div><div class="history-badges"><span class="badge">😊${e.mood}</span><span class="badge">😬${e.stress}</span><span class="badge">⚡${e.energy}</span><span class="badge">💤${e.sleep}</span><span class="badge">🤝${e.social}</span></div>${th}${nh}</div>`}).join('')}
+
+// ═══════════════════════════════════════════════════
+// EXPORT
+// ═══════════════════════════════════════════════════
+function exportData(){const data={exported:new Date().toISOString(),app:'MindBloom v4',wellness_entries:entries,journal_entries:journalEntries};const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=`mindbloom-export-${activeDate()}.json`;document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(url)}
+
+// ═══════════════════════════════════════════════════
+// IMPORT
+// ═══════════════════════════════════════════════════
+let pendingImportData=null;
+function triggerImport(){document.getElementById('import-file-input').value='';document.getElementById('import-file-input').click()}
+function handleImportFile(e){
+  const file=e.target.files[0];
+  if(!file)return;
+  const reader=new FileReader();
+  reader.onload=(ev)=>{
+    try{
+      const data=JSON.parse(ev.target.result);
+      const we=Array.isArray(data.wellness_entries)?data.wellness_entries:[];
+      const je=Array.isArray(data.journal_entries)?data.journal_entries:[];
+      if(!we.length&&!je.length){alert('No valid MindBloom data found in this file.');return}
+      pendingImportData={we,je};
+      document.getElementById('import-preview').innerHTML=
+        `<strong style="color:var(--text)">Found in file:</strong><br>`+
+        `📊 ${we.length} wellness check-in${we.length!==1?'s':''}<br>`+
+        `📓 ${je.length} journal entr${je.length!==1?'ies':'y'}<br>`+
+        (data.exported?`<span style="color:var(--dim);font-size:.72rem">Exported: ${new Date(data.exported).toLocaleString()}</span>`:'');
+      document.getElementById('import-modal').classList.remove('hidden');
+    }catch{alert('Could not read file. Make sure it\'s a valid MindBloom JSON export.');}
+  };
+  reader.readAsText(file);
+}
+function closeImportModal(){document.getElementById('import-modal').classList.add('hidden');pendingImportData=null}
+function confirmImport(){
+  if(!pendingImportData)return;
+  const{we,je}=pendingImportData;
+  // Merge wellness entries (overwrite same date)
+  const eMap={};
+  entries.forEach(e=>eMap[e.date]=e);
+  we.forEach(e=>eMap[e.date]=e);
+  entries=Object.values(eMap).sort((a,b)=>a.date.localeCompare(b.date));
+  LS.setEntries(entries);
+  // Merge journal entries (overwrite same id)
+  const jMap={};
+  journalEntries.forEach(e=>jMap[e.id]=e);
+  je.forEach(e=>jMap[e.id]=e);
+  journalEntries=Object.values(jMap).sort((a,b)=>b.ts-a.ts);
+  LS.setJournal(journalEntries);
+  closeImportModal();
+  // Refresh current view
+  reloadForDate();
+  if(currentTab==='history')renderHistory();
+  if(currentTab==='journal')renderJournal();
+  const we2=we.length,je2=je.length;
+  setTimeout(()=>alert(`✅ Import complete!\n${we2} wellness entr${we2!==1?'ies':'y'} and ${je2} journal entr${je2!==1?'ies':'y'} imported.`),100);
+}
+
+// ═══════════════════════════════════════════════════
+// CLEAR ALL
+// ═══════════════════════════════════════════════════
+function clearAllData(){if(!confirm('Clear ALL data? Cannot be undone.'))return;entries=[];journalEntries=[];LS.setEntries([]);LS.setJournal([]);survey={mood:5,stress:5,energy:5,sleep:5,social:5,tags:[],word:'',note:''};currentStep=1;document.getElementById('summary-view').classList.add('hidden');document.getElementById('checkin-flow').classList.remove('hidden');['chat-card','insights-card'].forEach(id=>document.getElementById(id).classList.add('hidden'));renderStep();switchTab('today')}
+
+// ═══════════════════════════════════════════════════
+// BREATHE
+// ═══════════════════════════════════════════════════
+const BREATHE_PATTERNS={
+  calm:{phases:[{label:'Inhale',dur:4},{label:'Exhale',dur:6}],total:10},
+  box:{phases:[{label:'Inhale',dur:4},{label:'Hold',dur:4},{label:'Exhale',dur:4},{label:'Hold',dur:4}],total:16},
+  '478':{phases:[{label:'Inhale',dur:4},{label:'Hold',dur:7},{label:'Exhale',dur:8}],total:19},
+};
+let breathePattern='calm', breatheTimer=null, breathePhaseIdx=0;
+// Track current circle scale to allow smooth transitions
+let breatheCurrentScale=1.0;
+let breatheRafId=null, breathePhaseStart=null, breathePhaseFrom=1.0, breathePhaseTo=1.0, breathePhaseDur=4000;
+
+function initBreathe(){
+  startBreathePattern();
+  highlightBreatheBtn();
+}
+
+function setBreathePattern(p){
+  breathePattern=p;
+  breathePhaseIdx=0;
+  startBreathePattern();
+  highlightBreatheBtn();
+}
+
+function highlightBreatheBtn(){
+  ['calm','box','478'].forEach(p=>{
+    const btn=document.getElementById('bp-'+p);
+    if(btn){btn.classList.toggle('btn-primary',p===breathePattern);btn.classList.toggle('btn-secondary',p!==breathePattern);}
+  });
+  // Show/hide box vs circle UI
+  const isBox=breathePattern==='box';
+  const boxC=document.getElementById('breathe-box-container');
+  const circC=document.getElementById('breathe-circle-container');
+  const sub=document.getElementById('breathe-sub');
+  if(boxC)boxC.style.display=isBox?'block':'none';
+  if(circC)circC.style.display=isBox?'none':'flex';
+  if(sub)sub.textContent=isBox?'follow the dot around the square.':'breathe with the circle.';
+}
+
+function startBreathePattern(){
+  if(breatheTimer)clearInterval(breatheTimer);
+  if(breatheRafId){cancelAnimationFrame(breatheRafId);breatheRafId=null;}
+  const pattern=BREATHE_PATTERNS[breathePattern];
+  breathePhaseIdx=0;
+  if(breathePattern==='box'){
+    startBoxPhase(pattern);
+  } else {
+    applyCirclePhase(pattern, true);
+  }
+}
+
+// ── Circle breathing (smooth via rAF) ──────────────────────
+function applyCirclePhase(pattern, first){
+  const phase=pattern.phases[breathePhaseIdx];
+  const label=document.getElementById('breathe-phase');
+  if(label) label.textContent=phase.label;
+  const isInhale=phase.label==='Inhale';
+  const isHold=phase.label==='Hold';
+  breathePhaseFrom=breatheCurrentScale;
+  breathePhaseTo=isHold?breatheCurrentScale:(isInhale?1.65:1.0);
+  breathePhaseDur=phase.dur*1000;
+  breathePhaseStart=null;
+  if(breatheRafId){cancelAnimationFrame(breatheRafId);breatheRafId=null;}
+  breatheRafId=requestAnimationFrame(tickCircle);
+}
+
+function easeInOut(t){return t<0.5?2*t*t:1-Math.pow(-2*t+2,2)/2;}
+
+function tickCircle(ts){
+  if(!breathePhaseStart) breathePhaseStart=ts;
+  const elapsed=ts-breathePhaseStart;
+  const t=Math.min(1,elapsed/breathePhaseDur);
+  const pattern=BREATHE_PATTERNS[breathePattern];
+  const phase=pattern.phases[breathePhaseIdx];
+  const isHold=phase.label==='Hold';
+  const eased=isHold?t:easeInOut(t);
+  const scale=breathePhaseFrom+(breathePhaseTo-breathePhaseFrom)*eased;
+  breatheCurrentScale=scale;
+  const circle=document.getElementById('breathe-circle');
+  const glow=document.getElementById('breathe-glow');
+  if(circle){
+    circle.style.transform=`scale(${scale})`;
+    circle.style.opacity=0.7+0.3*(scale-1)/0.65;
+  }
+  if(glow){
+    glow.style.transform=`scale(${0.5+scale*0.6})`;
+    glow.style.opacity=0.4+(scale-1)*0.3;
+  }
+  if(t<1){
+    breatheRafId=requestAnimationFrame(tickCircle);
+  } else {
+    breathePhaseIdx=(breathePhaseIdx+1)%pattern.phases.length;
+    breatheRafId=requestAnimationFrame(()=>applyCirclePhase(pattern,false));
+  }
+}
+
+// ── Box breathing (dot travels around rounded square) ────────
+// Square corners: TL(20,20) TR(180,20) BR(180,180) BL(20,180)
+// Each side = 160px, total perimeter ≈ 640px
+// We animate the dot along 4 segments, one per phase
+const BOX_CORNERS=[
+  {x:20,y:20},{x:180,y:20},{x:180,y:180},{x:20,y:180}
+];
+let boxPhaseStart=null, boxRafId=null;
+let boxDotFrom={x:20,y:20}, boxDotTo={x:180,y:20};
+
+function startBoxPhase(pattern){
+  if(boxRafId){cancelAnimationFrame(boxRafId);boxRafId=null;}
+  const phase=pattern.phases[breathePhaseIdx];
+  const label=document.getElementById('breathe-phase');
+  if(label) label.textContent=phase.label;
+  // Update phase tick highlights
+  document.querySelectorAll('.box-tick').forEach(el=>{
+    el.classList.toggle('active',+el.dataset.phase===breathePhaseIdx);
+  });
+  boxDotFrom={...BOX_CORNERS[breathePhaseIdx]};
+  boxDotTo={...BOX_CORNERS[(breathePhaseIdx+1)%4]};
+  boxPhaseStart=null;
+  boxRafId=requestAnimationFrame(tickBox);
+}
+
+function tickBox(ts){
+  if(!boxPhaseStart) boxPhaseStart=ts;
+  const pattern=BREATHE_PATTERNS['box'];
+  const phase=pattern.phases[breathePhaseIdx];
+  const elapsed=ts-boxPhaseStart;
+  const t=Math.min(1,elapsed/(phase.dur*1000));
+  const eased=easeInOut(t);
+  const x=boxDotFrom.x+(boxDotTo.x-boxDotFrom.x)*eased;
+  const y=boxDotFrom.y+(boxDotTo.y-boxDotFrom.y)*eased;
+  const dot=document.getElementById('box-dot');
+  const dotI=document.getElementById('box-dot-inner');
+  if(dot){dot.setAttribute('cx',x);dot.setAttribute('cy',y);}
+  if(dotI){dotI.setAttribute('cx',x);dotI.setAttribute('cy',y);}
+  // Draw trail as dashoffset
+  const totalLen=640;
+  const startOffset=breathePhaseIdx*160;
+  const rect=document.getElementById('box-path-rect');
+  if(rect){
+    const drawn=startOffset+t*160;
+    rect.setAttribute('stroke-dashoffset', totalLen-drawn);
+  }
+  if(t<1){
+    boxRafId=requestAnimationFrame(tickBox);
+  } else {
+    breathePhaseIdx=(breathePhaseIdx+1)%4;
+    if(breathePhaseIdx===0){
+      // Reset trail
+      const rect=document.getElementById('box-path-rect');
+      if(rect) rect.setAttribute('stroke-dashoffset',640);
+    }
+    boxRafId=requestAnimationFrame(()=>startBoxPhase(pattern));
+  }
+}
+
+// ═══════════════════════════════════════════════════
+// DEV PANEL
+// ═══════════════════════════════════════════════════
+let devPanelOpen=false;
+function toggleDevPanel(){devPanelOpen=!devPanelOpen;document.getElementById('dev-inner').classList.toggle('hidden',!devPanelOpen);document.getElementById('dev-toggle-btn').textContent=`🛠 ${devPanelOpen?'Hide':'Open'} Developer Panel`}
+function applyDevDate(){devDate=document.getElementById('dev-date-input').value||null;LS.setDevDate(devDate);updateDevUI();reloadForDate()}
+function clearDevDate(){devDate=null;document.getElementById('dev-date-input').value='';LS.setDevDate(null);updateDevUI();reloadForDate()}
+function updateDevUI(){const b=document.getElementById('dev-active-badge'),c=document.getElementById('dev-clear-btn'),h=document.getElementById('dev-on-badge');if(devDate){b.classList.remove('hidden');b.innerHTML=`📅 Acting as <strong style="margin-left:.3rem">${devDate}</strong>`;c.classList.remove('hidden');h.classList.remove('hidden');h.textContent=`🛠 Dev · ${devDate}`}else{b.classList.add('hidden');c.classList.add('hidden');h.classList.add('hidden')}}
+function reloadForDate(){const e=todayEntry();chatMessages=[];document.getElementById('chat-card').classList.add('hidden');document.getElementById('chat-messages').innerHTML='';if(e){document.getElementById('checkin-flow').classList.add('hidden');document.getElementById('summary-view').classList.remove('hidden');showSummary(e,false)}else{document.getElementById('summary-view').classList.add('hidden');document.getElementById('insights-card').classList.add('hidden');document.getElementById('checkin-flow').classList.remove('hidden');survey={mood:5,stress:5,energy:5,sleep:5,social:5,tags:[],word:'',note:''};currentStep=1;renderStep()}}
+
+// ═══════════════════════════════════════════════════
+// API KEY MANAGEMENT
+// ═══════════════════════════════════════════════════
+function getApiKey(){return localStorage.getItem('mindbloom_apikey')||''}
+function setApiKey(k){if(k)localStorage.setItem('mindbloom_apikey',k);else localStorage.removeItem('mindbloom_apikey')}
+
+function openApiKeyModal(){
+  const modal=document.getElementById('api-key-modal');
+  if(!modal)return;
+  document.getElementById('api-key-input').value=getApiKey()||'';
+  document.getElementById('api-key-error').textContent='';
+  modal.classList.remove('hidden');
+}
+function closeApiKeyModal(){
+  document.getElementById('api-key-modal').classList.add('hidden');
+}
+function saveApiKey(){
+  const val=document.getElementById('api-key-input').value.trim();
+  const errEl=document.getElementById('api-key-error');
+  if(val&&!val.startsWith('AIza')){
+    errEl.textContent='⚠ That doesn\'t look like a Gemini key (should start with AIza…)';
+    return;
+  }
+  errEl.textContent='';
+  setApiKey(val);
+  closeApiKeyModal();
+  updateBloomConnectBtn();
+}
+function updateBloomConnectBtn(){
+  const banner=document.getElementById('bloom-no-key-banner');
+  if(!banner)return;
+  if(getApiKey()){
+    banner.remove();
+  }
+}
+
+// ═══════════════════════════════════════════════════
+// LOADING SCREEN
+// ═══════════════════════════════════════════════════
+const LOADING_TIPS=[
+  'Tracking your mood daily builds real self-awareness 🌿',
+  'Even 2 minutes of box breathing lowers cortisol 🫧',
+  'Sleep and stress are deeply connected 💤',
+  'Your data stays private — stored only on this device 🔒',
+  'Small check-ins compound into powerful insights 📈',
+  'You showed up today. That matters 💙',
+];
+
+function runLoadingScreen(){
+  const screen=document.getElementById('loading-screen');
+  const bar=document.getElementById('loading-bar-fill');
+  const tip=document.getElementById('loading-tip');
+  if(!screen)return Promise.resolve();
+
+  // Scatter stars
+  const starsDiv=document.createElement('div');
+  starsDiv.className='loading-stars';
+  for(let i=0;i<18;i++){
+    const s=document.createElement('div');
+    s.className='loading-star';
+    const size=Math.random()*3+1.5;
+    s.style.cssText=`width:${size}px;height:${size}px;left:${Math.random()*100}%;top:${Math.random()*100}%;--dur:${(Math.random()*2+1.5).toFixed(1)}s;--delay:${(Math.random()*2).toFixed(1)}s`;
+    starsDiv.appendChild(s);
+  }
+  screen.insertBefore(starsDiv,screen.firstChild);
+
+  // Cycle tips
+  let ti=Math.floor(Math.random()*LOADING_TIPS.length);
+  tip.textContent=LOADING_TIPS[ti];
+  const tipInterval=setInterval(()=>{
+    tip.style.opacity='0';
+    setTimeout(()=>{
+      ti=(ti+1)%LOADING_TIPS.length;
+      tip.textContent=LOADING_TIPS[ti];
+      tip.style.opacity='1';
+    },400);
+  },2200);
+
+  return new Promise(resolve=>{
+    let pct=0;
+    const minDuration=1800; // at least 1.8s
+    const startTime=Date.now();
+    const tickBar=()=>{
+      const elapsed=Date.now()-startTime;
+      // Fast first 60%, then slow to wait for fonts/scripts
+      const natural=Math.min(95, elapsed/minDuration*100);
+      pct=Math.max(pct,natural);
+      bar.style.width=pct+'%';
+      if(pct<95||elapsed<minDuration){
+        requestAnimationFrame(tickBar);
+      } else {
+        // Snap to 100% then fade out
+        clearInterval(tipInterval);
+        bar.style.width='100%';
+        setTimeout(()=>{
+          screen.classList.add('fade-out');
+          setTimeout(()=>{screen.style.display='none';resolve();},650);
+        },300);
+      }
+    };
+    requestAnimationFrame(tickBar);
+  });
+}
+
+// ═══════════════════════════════════════════════════
+// INIT
+// ═══════════════════════════════════════════════════
+async function init(){
+  await runLoadingScreen();
+
+  if(devDate){document.getElementById('dev-date-input').value=devDate;updateDevUI()}
+  const jl=document.getElementById('journal-date-label');
+  if(jl)jl.textContent=formatDate(activeDate());
+  const e=todayEntry();
+  if(e){document.getElementById('checkin-flow').classList.add('hidden');showSummary(e,false)}
+  else renderStep();
+
+  // If no API key stored, show setup prompt once
+  if(!getApiKey()&&!localStorage.getItem('mindbloom_key_dismissed')){
+    localStorage.setItem('mindbloom_key_dismissed','1');
+    setTimeout(openApiKeyModal, 800);
+  }
+}
+init();
+</script>
+</body>
+</html>
