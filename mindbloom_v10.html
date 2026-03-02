@@ -13,7 +13,7 @@
 // ═══════════════════════════════════════════════════════════════════
 let clayRenderer=null, clayScene=null, clayCamera=null, clayAnimId=null;
 let clayHead=null, clayOrigPositions=null;
-let clayHP=300, clayName='', clayGender='male', clayBroken=false;
+let clayHP=100, clayName='', clayGender='male', clayBroken=false;
 let clayRotY=0, clayAutoRotate=true;
 let claySetupDone=false;
 let claySelectedGender=null;
@@ -406,7 +406,7 @@ function clayDoPunch(ndcX, ndcY){
   if(!headMesh||!headMesh.geometry) return;
 
   clayPunchCount++;
-  const damage=Math.random()*12+8; // 8-20 damage
+  const damage=Math.random()*2+8; // 8-20 damage
   clayHP=Math.max(0,clayHP-damage);
   updateHPBar();
 
