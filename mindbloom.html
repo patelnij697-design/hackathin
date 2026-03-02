@@ -1,0 +1,1358 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>MindBloom · Daily Wellness</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js">
+// ═══════════════════════════════════════════════════════════════════
+// CLAY SCULPT — Three.js 3D head with deformation & punch physics
+// ═══════════════════════════════════════════════════════════════════
+let clayRenderer=null, clayScene=null, clayCamera=null, clayAnimId=null;
+let clayHead=null, clayOrigPositions=null;
+let clayHP=100, clayName='', clayGender='male', clayBroken=false;
+let clayRotY=0, clayAutoRotate=true;
+let claySetupDone=false;
+let claySelectedGender=null;
+let clayParticles=[], clayPunchCount=0;
+
+function selectGender(g){
+  claySelectedGender=g;
+  ['male','female','round'].forEach(x=>{
+    document.getElementById('g-'+x).classList.toggle('selected',x===g);
+  });
+  document.getElementById('clay-start-btn').disabled=false;
+}
+
+function initClayTab(){
+  if(claySetupDone&&clayScene) return;
+  // reset
+  claySelectedGender=null;
+  ['male','female','round'].forEach(x=>document.getElementById('g-'+x).classList.remove('selected'));
+  document.getElementById('clay-start-btn').disabled=true;
+  document.getElementById('clay-name-input').value='';
+  document.getElementById('clay-setup').classList.remove('hidden');
+  document.getElementById('clay-scene').classList.add('hidden');
+  document.getElementById('clay-broken-msg').classList.remove('show');
+}
+
+function startClaySculpt(){
+  if(!claySelectedGender) return;
+  clayName=document.getElementById('clay-name-input').value.trim()||'???';
+  clayGender=claySelectedGender;
+  document.getElementById('clay-setup').classList.add('hidden');
+  document.getElementById('clay-scene').classList.remove('hidden');
+  document.getElementById('clay-name-tag-label').textContent=clayName;
+  clayHP=100; clayBroken=false; clayPunchCount=0; clayParticles=[];
+  updateHPBar();
+  document.getElementById('clay-broken-msg').classList.remove('show');
+  claySetupDone=true;
+  setTimeout(buildClayScene, 50);
+}
+
+function buildClayScene(){
+  const wrap=document.getElementById('clay-canvas-wrap');
+  const canvas=document.getElementById('clay-canvas');
+  const W=wrap.clientWidth, H=Math.min(360, W*0.88);
+  canvas.width=W*window.devicePixelRatio;
+  canvas.height=H*window.devicePixelRatio;
+  canvas.style.height=H+'px';
+  wrap.style.height=H+'px';
+
+  if(clayAnimId){ cancelAnimationFrame(clayAnimId); clayAnimId=null; }
+  if(clayRenderer){ clayRenderer.dispose(); clayRenderer=null; }
+
+  clayScene=new THREE.Scene();
+  clayScene.background=new THREE.Color(0x0d0618);
+  // Subtle fog
+  clayScene.fog=new THREE.Fog(0x0d0618,8,20);
+
+  clayCamera=new THREE.PerspectiveCamera(45, W/H, 0.1, 100);
+  clayCamera.position.set(0,0.3,3.8);
+
+  clayRenderer=new THREE.WebGLRenderer({canvas,antialias:true,alpha:false});
+  clayRenderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
+  clayRenderer.setSize(W,H,false);
+  clayRenderer.shadowMap.enabled=true;
+
+  // Lights
+  const amb=new THREE.AmbientLight(0x9966cc,0.4);
+  clayScene.add(amb);
+  const key=new THREE.DirectionalLight(0xffeedd,1.4);
+  key.position.set(2,3,3); key.castShadow=true;
+  clayScene.add(key);
+  const fill=new THREE.DirectionalLight(0x6644aa,0.5);
+  fill.position.set(-3,1,-2);
+  clayScene.add(fill);
+  const rim=new THREE.PointLight(0xff8844,0.7,8);
+  rim.position.set(0,2,-2);
+  clayScene.add(rim);
+
+  // Ground plane
+  const floor=new THREE.Mesh(
+    new THREE.PlaneGeometry(10,10),
+    new THREE.MeshStandardMaterial({color:0x110022,roughness:1})
+  );
+  floor.rotation.x=-Math.PI/2; floor.position.y=-1.6; floor.receiveShadow=true;
+  clayScene.add(floor);
+
+  buildHead();
+  setupClayInteraction(canvas, wrap, W, H);
+  clayLoop();
+}
+
+function buildHead(){
+  if(clayHead){ clayScene.remove(clayHead); clayHead=null; }
+
+  const group=new THREE.Group();
+
+  // Head geometry based on gender
+  let headGeo;
+  if(clayGender==='male'){
+    // Wider jaw, squarer
+    headGeo=new THREE.SphereGeometry(0.8,48,48);
+    const pos=headGeo.attributes.position;
+    for(let i=0;i<pos.count;i++){
+      const y=pos.getY(i);
+      const x=pos.getX(i);
+      const z=pos.getZ(i);
+      // flatten top slightly, widen jaw area
+      if(y<-0.2){ pos.setX(i,x*1.15); pos.setZ(i,z*1.05); }
+      if(y>0.5){ pos.setX(i,x*0.9); pos.setZ(i,z*0.88); }
+      // forehead protrusion
+      if(y>0.2&&z>0) pos.setZ(i,z*1.08);
+    }
+    pos.needsUpdate=true;
+    headGeo.computeVertexNormals();
+  } else if(clayGender==='female'){
+    // Narrower, oval, higher cheekbones
+    headGeo=new THREE.SphereGeometry(0.76,48,48);
+    const pos=headGeo.attributes.position;
+    for(let i=0;i<pos.count;i++){
+      const y=pos.getY(i);
+      const x=pos.getX(i);
+      const z=pos.getZ(i);
+      // taller, narrower
+      pos.setY(i,y*1.15);
+      pos.setX(i,x*0.88);
+      // cheekbone area
+      if(y>-0.1&&y<0.3) pos.setX(i,pos.getX(i)*1.05);
+      // narrow chin
+      if(y<-0.3) pos.setX(i,x*0.72);
+    }
+    pos.needsUpdate=true;
+    headGeo.computeVertexNormals();
+  } else {
+    // Round/neutral — pure sphere slightly squashed
+    headGeo=new THREE.SphereGeometry(0.82,48,48);
+    const pos=headGeo.attributes.position;
+    for(let i=0;i<pos.count;i++){
+      pos.setY(i,pos.getY(i)*0.95);
+    }
+    pos.needsUpdate=true;
+    headGeo.computeVertexNormals();
+  }
+
+  // Clay material — matte terracotta
+  const hue=clayGender==='male'?0.055:clayGender==='female'?0.06:0.065;
+  const clayMat=new THREE.MeshStandardMaterial({
+    color: new THREE.Color().setHSL(hue,0.5,0.58),
+    roughness:0.85, metalness:0.0,
+    flatShading:false,
+  });
+  const head=new THREE.Mesh(headGeo,clayMat);
+  head.castShadow=true; head.receiveShadow=true;
+  head.position.y=0;
+  group.add(head);
+
+  // Neck
+  const neckGeo=new THREE.CylinderGeometry(0.28,0.34,0.55,24);
+  const neck=new THREE.Mesh(neckGeo,clayMat.clone());
+  neck.position.y=-0.9; neck.castShadow=true;
+  group.add(neck);
+
+  // Shoulders stub
+  const shoulderGeo=new THREE.SphereGeometry(0.9,24,12);
+  const shoulderMat=new THREE.MeshStandardMaterial({color:new THREE.Color().setHSL(hue,0.45,0.5),roughness:0.9,metalness:0});
+  const shoulder=new THREE.Mesh(shoulderGeo,shoulderMat);
+  shoulder.position.y=-1.35; shoulder.scale.set(1,0.45,0.75); shoulder.castShadow=true;
+  group.add(shoulder);
+
+  // Facial features
+  addFaceFeatures(group, hue);
+
+  clayHead=group;
+  clayScene.add(group);
+
+  // Store original vertex positions for deformation
+  const verts=head.geometry.attributes.position;
+  clayOrigPositions=new Float32Array(verts.array);
+}
+
+function addFaceFeatures(group, hue){
+  const darkClay=new THREE.MeshStandardMaterial({color:new THREE.Color().setHSL(hue,0.55,0.38),roughness:0.9});
+  const eyeWhite=new THREE.MeshStandardMaterial({color:0xf0e8d8,roughness:0.7});
+  const eyeDark=new THREE.MeshStandardMaterial({color:0x221100,roughness:0.6});
+
+  // Eyes
+  const eyeR=eyeGeo(group,eyeWhite,eyeDark,-0.23,0.1,0.72);
+  const eyeL=eyeGeo(group,eyeWhite,eyeDark, 0.23,0.1,0.72);
+
+  // Nose
+  const noseGeo=new THREE.SphereGeometry(0.1,12,8);
+  const nose=new THREE.Mesh(noseGeo,darkClay);
+  nose.position.set(0,-0.04,0.75); nose.scale.set(1,0.75,1.2);
+  group.add(nose);
+
+  // Mouth line
+  const mouthGeo=new THREE.TorusGeometry(0.18,0.03,8,20,Math.PI);
+  const mouth=new THREE.Mesh(mouthGeo,darkClay);
+  mouth.position.set(0,-0.28,0.72); mouth.rotation.z=Math.PI;
+  group.add(mouth);
+
+  // Ears
+  const earGeo=new THREE.SphereGeometry(0.13,12,8);
+  [-1,1].forEach(side=>{
+    const ear=new THREE.Mesh(earGeo,new THREE.MeshStandardMaterial({color:new THREE.Color().setHSL(hue,0.48,0.5),roughness:0.9}));
+    ear.position.set(side*0.82,0,0.1); ear.scale.set(0.6,1,0.5);
+    group.add(ear);
+  });
+
+  if(clayGender==='female'){
+    // Simple hair mass
+    const hairGeo=new THREE.SphereGeometry(0.86,24,24);
+    const hairMat=new THREE.MeshStandardMaterial({color:0x1a0a00,roughness:0.95});
+    const hair=new THREE.Mesh(hairGeo,hairMat);
+    hair.position.set(0,0.12,-0.05); hair.scale.set(1,0.85,0.88);
+    // clip top — hair is behind head in render order
+    hair.renderOrder=-1;
+    group.add(hair);
+  } else if(clayGender==='male'){
+    // Short hair ridge
+    const hairGeo=new THREE.SphereGeometry(0.83,24,16);
+    const hairMat=new THREE.MeshStandardMaterial({color:0x1a0800,roughness:0.98});
+    const hair=new THREE.Mesh(hairGeo,hairMat);
+    hair.position.set(0,0.4,0); hair.scale.set(1,0.4,1);
+    group.add(hair);
+  }
+}
+
+function eyeGeo(group,white,dark,x,y,z){
+  const eGeo=new THREE.SphereGeometry(0.09,12,8);
+  const eye=new THREE.Mesh(eGeo,white);
+  eye.position.set(x,y,z);
+  group.add(eye);
+  const pupilGeo=new THREE.SphereGeometry(0.05,10,8);
+  const pupil=new THREE.Mesh(pupilGeo,dark);
+  pupil.position.set(x*1.001,y,z+0.06);
+  group.add(pupil);
+}
+
+function setupClayInteraction(canvas, wrap, W, H){
+  const onPunch=(clientX,clientY)=>{
+    if(clayBroken) return;
+    const rect=wrap.getBoundingClientRect();
+    const x=clientX-rect.left, y=clientY-rect.top;
+    // Show ring effect
+    const ring=document.createElement('div');
+    ring.className='punch-ring';
+    ring.style.left=x+'px'; ring.style.top=y+'px';
+    document.getElementById('clay-punch-rings').appendChild(ring);
+    setTimeout(()=>ring.remove(),500);
+    doPunch(x/W*2-1, -(y/H*2-1));
+  };
+  canvas.addEventListener('click',(e)=>{
+    const r=canvas.getBoundingClientRect();
+    onPunch(e.clientX,e.clientY);
+  });
+  canvas.addEventListener('touchend',(e)=>{
+    e.preventDefault();
+    const t=e.changedTouches[0];
+    onPunch(t.clientX,t.clientY);
+  },{passive:false});
+}
+
+function doPunch(ndcX, ndcY){
+  if(!clayHead||clayBroken) return;
+  const headMesh=clayHead.children[0]; // head sphere
+  if(!headMesh||!headMesh.geometry) return;
+
+  clayPunchCount++;
+  const damage=Math.random()*12+8; // 8-20 damage
+  clayHP=Math.max(0,clayHP-damage);
+  updateHPBar();
+
+  // Camera shake
+  const origPos=clayCamera.position.clone();
+  let shakes=0;
+  const shakeId=setInterval(()=>{
+    clayCamera.position.x=origPos.x+(Math.random()-.5)*0.08;
+    clayCamera.position.y=origPos.y+(Math.random()-.5)*0.06;
+    if(++shakes>6){ clearInterval(shakeId); clayCamera.position.copy(origPos); }
+  },30);
+
+  // Deform mesh vertices near punch point
+  const pos=headMesh.geometry.attributes.position;
+  const localX=ndcX*0.6, localY=ndcY*0.5;
+  const punchDepth=(clayHP<40)?0.18:0.12;
+  const punchRadius=0.45;
+  for(let i=0;i<pos.count;i++){
+    const x=pos.getX(i), y=pos.getY(i), z=pos.getZ(i);
+    if(z<-0.1) continue; // don't deform back of head much
+    const dist=Math.sqrt((x-localX)**2+(y-localY)**2);
+    if(dist<punchRadius){
+      const factor=(1-dist/punchRadius)*punchDepth;
+      const origZ=clayOrigPositions[i*3+2];
+      const newZ=Math.max(origZ-factor*1.8, z-factor);
+      pos.setZ(i,newZ);
+      // slight x/y scatter for impact crater
+      pos.setX(i,x+(x-localX)*factor*0.3+(Math.random()-.5)*factor*0.15);
+      pos.setY(i,y+(y-localY)*factor*0.2+(Math.random()-.5)*factor*0.1);
+    }
+  }
+  pos.needsUpdate=true;
+  headMesh.geometry.computeVertexNormals();
+
+  // Add cracks (thin lines as dark meshes if heavy damage)
+  if(clayHP<70 && clayPunchCount%3===0) addCrack(localX,localY);
+
+  // Spawn debris particles
+  spawnDebris(localX,localY);
+
+  // Flash text
+  const hits=['POW!','WHACK!','SMASH!','CRACK!','THUD!','BAM!'];
+  showFlash(hits[Math.floor(Math.random()*hits.length)]);
+
+  if(clayHP<=0) destroySculpt();
+}
+
+function addCrack(cx,cy){
+  const crackMat=new THREE.MeshStandardMaterial({color:0x1a0800,roughness:1,side:THREE.DoubleSide});
+  const len=Math.random()*0.4+0.15;
+  const angle=Math.random()*Math.PI;
+  const crackGeo=new THREE.PlaneGeometry(len,0.015);
+  const crack=new THREE.Mesh(crackGeo,crackMat);
+  crack.position.set(
+    cx+(Math.random()-.5)*0.2,
+    cy+(Math.random()-.5)*0.2,
+    0.82
+  );
+  crack.rotation.z=angle;
+  clayHead.add(crack);
+}
+
+function spawnDebris(cx,cy){
+  if(!clayScene) return;
+  const count=Math.floor(Math.random()*4+2);
+  for(let i=0;i<count;i++){
+    const geo=new THREE.SphereGeometry(Math.random()*0.04+0.01,6,4);
+    const mat=new THREE.MeshStandardMaterial({color:new THREE.Color().setHSL(0.06,0.5,0.55),roughness:0.9});
+    const p=new THREE.Mesh(geo,mat);
+    p.position.set(
+      cx+(Math.random()-.5)*0.3,
+      cy+(Math.random()-.5)*0.3,
+      0.85
+    );
+    p.userData={
+      vx:(Math.random()-.5)*0.08,
+      vy:Math.random()*0.06+0.02,
+      vz:Math.random()*0.04+0.01,
+      life:1.0
+    };
+    clayScene.add(p);
+    clayParticles.push(p);
+  }
+}
+
+function updateDebris(){
+  for(let i=clayParticles.length-1;i>=0;i--){
+    const p=clayParticles[i];
+    p.userData.vy-=0.003;
+    p.position.x+=p.userData.vx;
+    p.position.y+=p.userData.vy;
+    p.position.z+=p.userData.vz;
+    p.userData.life-=0.025;
+    p.material.opacity=p.userData.life;
+    p.material.transparent=true;
+    if(p.userData.life<=0){
+      clayScene.remove(p);
+      p.geometry.dispose();
+      clayParticles.splice(i,1);
+    }
+  }
+}
+
+function showFlash(text){
+  const el=document.getElementById('clay-status-flash');
+  el.textContent=text;
+  el.style.opacity='1';
+  clearTimeout(el._t);
+  el._t=setTimeout(()=>el.style.opacity='0',500);
+}
+
+function destroySculpt(){
+  clayBroken=true;
+  // Explode the head — scatter all vertices
+  if(clayHead){
+    const mesh=clayHead.children[0];
+    if(mesh&&mesh.geometry){
+      const pos=mesh.geometry.attributes.position;
+      for(let i=0;i<pos.count;i++){
+        pos.setX(i,pos.getX(i)+(Math.random()-.5)*0.5);
+        pos.setY(i,pos.getY(i)+(Math.random()-.5)*0.6);
+        pos.setZ(i,pos.getZ(i)+(Math.random()-.5)*0.5);
+      }
+      pos.needsUpdate=true;
+    }
+    // Spawn lots of debris
+    for(let i=0;i<20;i++) spawnDebris((Math.random()-.5)*0.8,(Math.random()-.5)*0.6);
+  }
+  setTimeout(()=>{
+    document.getElementById('clay-broken-msg').classList.add('show');
+  },600);
+}
+
+function updateHPBar(){
+  const pct=Math.max(0,clayHP);
+  document.getElementById('clay-hp-fill').style.width=pct+'%';
+  document.getElementById('clay-hp-pct').textContent=Math.round(pct)+'%';
+}
+
+function bigPunch(){
+  if(clayBroken) return;
+  // 3 rapid punches
+  [0,120,240].forEach(delay=>{
+    setTimeout(()=>{
+      const x=(Math.random()-.5)*0.6;
+      const y=(Math.random()-.5)*0.4;
+      doPunch(x,y);
+      // manual ring
+      const wrap=document.getElementById('clay-canvas-wrap');
+      const W=wrap.clientWidth, H=parseInt(wrap.style.height);
+      const px=(x+1)/2*W, py=(-y+1)/2*H;
+      const ring=document.createElement('div');
+      ring.className='punch-ring';
+      ring.style.left=px+'px'; ring.style.top=py+'px';
+      document.getElementById('clay-punch-rings').appendChild(ring);
+      setTimeout(()=>ring.remove(),500);
+    },delay);
+  });
+}
+
+function rotateClay(dir){
+  if(!clayHead) return;
+  const target=clayHead.rotation.y+dir*Math.PI/4;
+  const start=clayHead.rotation.y;
+  const t0=performance.now();
+  const spin=()=>{
+    const prog=Math.min((performance.now()-t0)/300,1);
+    const ease=1-Math.pow(1-prog,3);
+    clayHead.rotation.y=start+(target-start)*ease;
+    if(prog<1) requestAnimationFrame(spin);
+  };
+  spin();
+}
+
+function resetClay(){
+  if(clayAnimId){ cancelAnimationFrame(clayAnimId); clayAnimId=null; }
+  if(clayRenderer){ clayRenderer.dispose(); clayRenderer=null; }
+  clayScene=null; clayHead=null; clayOrigPositions=null;
+  clayParticles=[]; clayBroken=false; clayHP=100; clayPunchCount=0;
+  claySetupDone=false;
+  document.getElementById('clay-broken-msg').classList.remove('show');
+  document.getElementById('clay-scene').classList.add('hidden');
+  document.getElementById('clay-setup').classList.remove('hidden');
+  document.getElementById('clay-start-btn').disabled=true;
+  document.getElementById('clay-name-tag-label').textContent='???';
+  document.getElementById('clay-hp-fill').style.width='100%';
+  document.getElementById('clay-hp-pct').textContent='100%';
+  claySelectedGender=null;
+  ['male','female','round'].forEach(x=>document.getElementById('g-'+x).classList.remove('selected'));
+}
+
+let lastTime=0;
+function clayLoop(time=0){
+  if(!clayScene||!clayRenderer) return;
+  clayAnimId=requestAnimationFrame(clayLoop);
+  const dt=Math.min((time-lastTime)/1000,0.05);
+  lastTime=time;
+
+  // Auto-rotate when not broken
+  if(clayHead&&!clayBroken){
+    clayHead.rotation.y+=0.003;
+  }
+
+  updateDebris();
+  clayRenderer.render(clayScene,clayCamera);
+}
+
+
+</script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0b1120;font-family:'DM Sans',system-ui,sans-serif;color:#e2e8f0;min-height:100vh}
+:root{
+  --bg:#0b1120;--surface:#131f35;--surface2:#0f172a;--border:#1e293b;
+  --accent:#818cf8;--accent2:#a78bfa;--green:#4ade80;--yellow:#facc15;--red:#f87171;
+  --text:#e2e8f0;--muted:#94a3b8;--dim:#475569;--dimmer:#2d3f5a;
+}
+#app{display:flex;flex-direction:column;align-items:center;padding:2rem 1rem 5rem;max-width:460px;margin:0 auto}
+.card{background:var(--surface);border-radius:18px;padding:1.25rem;width:100%;box-shadow:0 4px 28px #00000055;margin-bottom:1rem}
+.tabs{display:flex;gap:3px;background:var(--surface2);border-radius:13px;padding:4px;width:100%;margin-bottom:1.1rem}
+.tab{flex:1;padding:.45rem .15rem;border:none;border-radius:10px;cursor:pointer;font-size:.71rem;font-weight:600;transition:all .2s;font-family:inherit}
+.tab.active{background:var(--accent);color:#0f172a}
+.tab.inactive{background:transparent;color:var(--dim)}
+.btn{border:none;border-radius:11px;cursor:pointer;font-family:inherit;font-weight:600;transition:all .15s}
+.btn-primary{background:var(--accent);color:#0f172a;padding:.65rem 1.2rem;font-size:.9rem}
+.btn-secondary{background:transparent;border:1px solid var(--border)!important;color:var(--dim);padding:.55rem 1rem;font-size:.85rem}
+.btn-gradient{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#0f172a;padding:.65rem 1.4rem;font-size:.9rem}
+.btn-danger{background:transparent;border:1px solid var(--red)!important;color:var(--red);padding:.5rem .9rem;font-size:.75rem}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.progress{display:flex;gap:4px;margin-bottom:.6rem}
+.progress-seg{flex:1;height:4px;border-radius:2px;transition:background .3s}
+.slider-wrap{margin-bottom:1.5rem}
+.slider-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:.4rem}
+.slider-label{font-family:'Playfair Display',serif;font-size:.95rem;color:var(--text)}
+.slider-emoji{font-size:1.6rem;transition:all .2s;min-width:2rem;text-align:right}
+input[type=range]{width:100%;appearance:none;height:6px;border-radius:3px;outline:none;cursor:pointer}
+input[type=range]::-webkit-slider-thumb{appearance:none;width:18px;height:18px;border-radius:50%;background:var(--accent);cursor:pointer;border:2px solid #0f172a;box-shadow:0 0 0 3px #818cf820}
+input[type=range]::-moz-range-thumb{width:16px;height:16px;border-radius:50%;background:var(--accent);cursor:pointer;border:2px solid #0f172a}
+.slider-hints{display:flex;justify-content:space-between;font-size:.7rem;color:var(--dim);margin-top:.2rem}
+.slider-val{color:var(--accent);font-weight:600}
+.tags-wrap{display:flex;flex-wrap:wrap;gap:.4rem;margin-bottom:1rem}
+.tag{padding:.3rem .8rem;border-radius:20px;border:1px solid var(--border);background:transparent;color:var(--dim);font-size:.78rem;cursor:pointer;transition:all .15s;font-family:inherit}
+.tag.active{border-color:var(--accent);background:#818cf820;color:var(--accent)}
+input[type=text],textarea{width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:.6rem .85rem;color:var(--text);font-size:.85rem;outline:none;font-family:inherit;resize:vertical;transition:border .2s}
+input[type=text]:focus,textarea:focus{border-color:var(--dimmer)}
+input[type=date]{background:var(--surface2);border:1px solid #1e3a6e;border-radius:8px;padding:.45rem .7rem;color:#93c5fd;font-size:.82rem;outline:none;font-family:inherit}
+#chat-messages{height:270px;overflow-y:auto;padding:1rem;scroll-behavior:smooth}
+.bubble-wrap{display:flex;margin-bottom:.8rem;animation:fadeIn .25s ease both}
+.bubble-wrap.user{justify-content:flex-end}
+.avatar{width:28px;height:28px;border-radius:50%;background:linear-gradient(135deg,var(--accent),var(--accent2));display:flex;align-items:center;justify-content:center;font-size:.75rem;margin-right:.5rem;flex-shrink:0;margin-top:2px}
+.bubble{max-width:80%;padding:.65rem .9rem;font-size:.88rem;line-height:1.55;white-space:pre-wrap}
+.bubble.ai{background:var(--border);border-radius:4px 16px 16px 16px;color:var(--text)}
+.bubble.user{background:linear-gradient(135deg,var(--accent),var(--accent2));border-radius:16px 4px 16px 16px;color:#0f172a}
+.typing-dots{display:flex;gap:5px;padding:4px 2px}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--accent);animation:bounce 1.2s ease-in-out infinite}
+.dot:nth-child(2){animation-delay:.2s}.dot:nth-child(3){animation-delay:.4s}
+.bar-row{display:flex;align-items:center;gap:.6rem;margin-bottom:.55rem}
+.bar-track{flex:3;height:5px;background:var(--border);border-radius:3px;overflow:hidden}
+.bar-fill{height:100%;background:var(--accent);border-radius:3px;transition:width .6s ease}
+.section-label{color:var(--dim);font-size:.7rem;text-transform:uppercase;letter-spacing:.09em;margin-bottom:.7rem}
+.q-label{font-family:'Playfair Display',serif;color:var(--text);font-size:1.1rem;line-height:1.5;margin-bottom:1.3rem}
+.opt-label{color:var(--muted);font-size:.78rem;text-transform:uppercase;letter-spacing:.07em;margin-bottom:.5rem;font-weight:600}
+.score-big{font-family:'Playfair Display',serif;font-size:3.8rem;font-weight:700;line-height:1}
+.score-denom{font-size:1.2rem;color:var(--dim)}
+.insight-grid{display:grid;grid-template-columns:1fr 1fr;gap:.8rem}
+.insight-tile{background:var(--surface2);border-radius:10px;padding:.85rem}
+.insight-val{font-family:'Playfair Display',serif;font-size:1.4rem;color:var(--accent);font-weight:700}
+.insight-name{font-size:.72rem;color:var(--text);margin-top:.1rem}
+.insight-sub{font-size:.65rem;color:var(--dim)}
+.journal-entry{border-left:3px solid var(--accent);padding-left:.9rem;margin-bottom:1.2rem}
+.journal-date{font-size:.72rem;color:var(--dim);letter-spacing:.06em;text-transform:uppercase;margin-bottom:.3rem}
+.journal-title{font-family:'Playfair Display',serif;font-size:1rem;color:var(--text);margin-bottom:.4rem}
+.journal-body{font-size:.85rem;color:var(--muted);line-height:1.6;white-space:pre-wrap}
+.journal-mood-badge{display:inline-flex;align-items:center;gap:.3rem;background:var(--surface2);border-radius:20px;padding:2px 8px;font-size:.72rem;color:var(--muted);margin-top:.5rem}
+.history-badges{display:flex;gap:.4rem;flex-wrap:wrap;margin-top:.5rem}
+.badge{background:var(--surface2);border-radius:6px;padding:2px 7px;font-size:.75rem;color:var(--muted)}
+.tag-badge{background:#818cf815;color:var(--accent);border-radius:10px;padding:2px 8px;font-size:.68rem}
+.privacy-banner{background:var(--surface2);border-radius:10px;padding:.5rem .9rem;display:flex;gap:.5rem;align-items:center;width:100%;margin-bottom:1rem}
+.dev-panel{width:100%;margin-top:1.5rem}
+.dev-btn{width:100%;padding:.45rem;background:transparent;border:1px dashed #1e3a6e;border-radius:8px;color:#3b6fc4;font-size:.72rem;cursor:pointer;font-family:inherit;letter-spacing:.06em}
+.dev-inner{background:#080f1e;border:1px dashed #1e3a6e;border-radius:12px;padding:1rem;margin-top:.5rem;animation:fadeIn .2s ease}
+.dev-badge{background:#0d2040;border-radius:8px;padding:.5rem .8rem;font-size:.75rem;color:#93c5fd;display:flex;align-items:center;gap:.5rem;margin-top:.7rem}
+.burnout-alert{background:#ff000015;border:1px solid var(--red);border-radius:10px;padding:.6rem .8rem;margin-bottom:1rem;font-size:.82rem;color:var(--red);line-height:1.5}
+.fade-in{animation:fadeIn .25s ease both}
+.hidden{display:none!important}
+.divider{border:none;border-top:1px solid var(--border);margin:.8rem 0}
+.w100{width:100%}
+.dev-on-badge{display:inline-flex;align-items:center;gap:.4rem;background:linear-gradient(135deg,#0d2040,#1e3a6e);border-radius:20px;padding:3px 12px;font-size:.72rem;color:#93c5fd;border:1px solid #1e3a6e;margin-top:.5rem}
+@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+@keyframes bounce{0%,60%,100%{transform:translateY(0)}30%{transform:translateY(-7px)}}
+::-webkit-scrollbar{width:4px}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
+  /* ── Clay Sculpt ── */
+  #clay-canvas-wrap{width:100%;border-radius:16px;overflow:hidden;position:relative;background:radial-gradient(ellipse at 50% 30%,#1e0a3c 0%,#0d0618 100%);touch-action:none;cursor:crosshair;user-select:none}
+  #clay-canvas-wrap canvas{display:block;width:100%!important;border-radius:16px}
+  .gender-options{display:grid;grid-template-columns:1fr 1fr 1fr;gap:.6rem;margin-bottom:1.2rem}
+  .gender-opt{padding:.8rem .4rem;border-radius:12px;border:2px solid var(--border);background:transparent;color:var(--dim);font-size:.85rem;cursor:pointer;transition:all .2s;font-family:inherit;font-weight:600;text-align:center}
+  .gender-opt:hover{border-color:var(--accent);color:var(--accent)}
+  .gender-opt.selected{border-color:var(--accent);background:#818cf820;color:var(--accent)}
+  .gender-opt .g-icon{font-size:1.6rem;display:block;margin-bottom:.3rem}
+  #clay-ui-overlay{position:absolute;bottom:0;left:0;right:0;padding:.8rem 1rem;background:linear-gradient(to top,rgba(11,5,32,.85),transparent);pointer-events:none}
+  #clay-name-tag{display:inline-block;background:#c2a46b;color:#2a1a00;font-family:'Playfair Display',serif;font-size:.85rem;font-weight:700;padding:.25rem .8rem;border-radius:4px;border:2px solid #8a6a30;letter-spacing:.03em;box-shadow:2px 2px 8px #00000077;transform:rotate(-1.5deg)}
+  #clay-hp-bar{height:8px;border-radius:4px;background:var(--border);overflow:hidden;margin-bottom:.4rem}
+  #clay-hp-fill{height:100%;border-radius:4px;background:linear-gradient(to right,#f87171,#facc15,#4ade80);transition:width .3s}
+  #clay-hp-label{font-size:.7rem;color:var(--dim);margin-bottom:.3rem;display:flex;justify-content:space-between}
+  #clay-broken-msg{position:absolute;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;background:rgba(11,5,32,.8);backdrop-filter:blur(6px);border-radius:16px;gap:.8rem;z-index:5}
+  #clay-broken-msg.show{display:flex}
+  #clay-status-flash{position:absolute;top:38%;left:50%;transform:translate(-50%,-50%);font-family:'Playfair Display',serif;font-size:2rem;color:#fff;text-shadow:0 2px 16px #000;pointer-events:none;opacity:0;transition:opacity .15s;white-space:nowrap;z-index:10}
+  .punch-ring{position:absolute;border-radius:50%;border:3px solid #f87171;pointer-events:none;animation:punchRing .5s ease-out forwards;z-index:8}
+  @keyframes punchRing{0%{opacity:.9;width:10px;height:10px;margin-left:-5px;margin-top:-5px}100%{opacity:0;width:80px;height:80px;margin-left:-40px;margin-top:-40px}}
+  #clay-controls{display:flex;gap:.6rem;margin-top:.8rem;flex-wrap:wrap}
+  .clay-ctrl-btn{flex:1;padding:.5rem;border:1px solid var(--border);border-radius:10px;background:transparent;color:var(--dim);font-size:.78rem;cursor:pointer;font-family:inherit;font-weight:600;transition:all .15s;min-width:80px}
+  .clay-ctrl-btn:hover{border-color:var(--accent);color:var(--accent)}
+.modal-overlay{position:fixed;inset:0;background:#00000088;display:flex;align-items:center;justify-content:center;z-index:100;padding:1rem}
+.modal{background:var(--surface);border-radius:18px;padding:1.4rem;width:100%;max-width:420px;box-shadow:0 8px 40px #000000aa}
+.modal-title{font-family:'Playfair Display',serif;font-size:1.2rem;color:var(--text);margin-bottom:1rem}
+header{text-align:center;margin-bottom:1.5rem;width:100%}
+header h1{font-family:'Playfair Display',serif;font-size:1.9rem;letter-spacing:-.02em;margin-bottom:.2rem}
+header p{color:var(--dim);font-size:.75rem;letter-spacing:.1em;text-transform:uppercase}
+.step-counter{text-align:right;font-size:.7rem;color:var(--dim);margin-bottom:1rem}
+.empty-state{text-align:center;color:var(--dim);padding:2rem 1rem}
+.empty-state .icon{font-size:2.5rem;margin-bottom:.8rem}
+.chat-open-btn{margin-top:1rem;padding:.55rem 1.4rem;background:linear-gradient(135deg,var(--accent),var(--accent2));border:none;border-radius:20px;color:#0f172a;font-weight:700;font-size:.85rem;cursor:pointer;box-shadow:0 4px 16px #818cf840;font-family:inherit}
+.action-row{display:flex;gap:.6rem;margin-top:1rem;width:100%}
+.action-row .btn{flex:1;padding:.55rem;font-size:.75rem}
+@media(max-width:480px){#app{padding:1.2rem .8rem 5rem}}
+
+/* ══ VENT / CLAY HEAD ══ */
+#vent-canvas-wrap{
+  position:relative;width:100%;height:360px;border-radius:16px;
+  overflow:hidden;background:radial-gradient(ellipse at 50% 35%,#1c1040 0%,#0a0a18 100%);
+  cursor:crosshair;margin-bottom:1rem;
+}
+#vent-canvas{display:block;width:100%;height:100%}
+#vent-nameplate{
+  position:absolute;bottom:18px;left:50%;transform:translateX(-50%);
+  background:#1a0a00cc;border:2px solid #8B4513;border-radius:6px;
+  padding:4px 20px;font-family:'Playfair Display',serif;
+  font-size:1rem;color:#e8c97a;letter-spacing:.1em;
+  text-shadow:0 0 10px #e8c97a66;pointer-events:none;white-space:nowrap;
+  backdrop-filter:blur(4px);
+}
+#vent-hit-flash{
+  position:absolute;inset:0;border-radius:16px;pointer-events:none;
+  background:radial-gradient(circle at var(--fx,50%) var(--fy,50%),#ff330055 0%,transparent 55%);
+  opacity:0;transition:opacity .06s;
+}
+#vent-punch-text{
+  position:absolute;top:42%;left:50%;transform:translate(-50%,-50%);
+  font-family:'Playfair Display',serif;font-size:2.4rem;font-weight:700;
+  color:#fff;text-shadow:0 0 20px #ff4444cc,0 2px 0 #000;
+  pointer-events:none;opacity:0;transition:none;z-index:5;
+}
+#vent-hp-bar-wrap{width:100%;height:12px;background:var(--surface2);border-radius:6px;overflow:hidden;margin-bottom:.7rem;position:relative}
+#vent-hp-bar{height:100%;border-radius:6px;transition:width .25s,background .3s}
+#vent-hp-label{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:.65rem;font-weight:700;color:#fff;pointer-events:none;text-shadow:0 1px 2px #000}
+#vent-status{text-align:center;font-size:.82rem;color:var(--muted);margin-bottom:.9rem;min-height:1.3em;font-style:italic}
+.gender-btn{flex:1;padding:.85rem .5rem;border:2px solid var(--border);border-radius:14px;background:transparent;color:var(--muted);font-family:inherit;font-weight:600;font-size:.85rem;cursor:pointer;transition:all .2s;text-align:center}
+.gender-btn:hover,.gender-btn.selected{border-color:var(--accent);color:var(--accent);background:#818cf812}
+#vent-punch-btn{
+  width:100%;padding:1.1rem;font-size:1.1rem;font-weight:700;letter-spacing:.04em;
+  background:linear-gradient(135deg,#ef4444,#b91c1c);
+  border:none;border-radius:14px;color:#fff;cursor:pointer;font-family:inherit;
+  box-shadow:0 4px 24px #ef444450;transition:all .1s;user-select:none;
+}
+#vent-punch-btn:active{transform:scale(.96);box-shadow:0 2px 12px #ef444430}
+#vent-punch-btn:disabled{background:#2d1a1a;color:#6b3a3a;box-shadow:none;cursor:not-allowed}
+.crack-particle{position:absolute;border-radius:50%;pointer-events:none;background:#c8a882}
+@keyframes particleFly{0%{opacity:1;transform:translate(0,0) scale(1)}100%{opacity:0;transform:translate(var(--dx),var(--dy)) scale(0)}}
+@keyframes punchPop{0%{opacity:1;transform:translate(-50%,-50%) scale(1.3)}100%{opacity:0;transform:translate(-50%,-90%) scale(.7)}}
+</style>
+</head>
+<body>
+
+<div id="app">
+  <header>
+    <div style="font-size:2.2rem;margin-bottom:.3rem">🌱</div>
+    <h1>MindBloom</h1>
+    <p>Daily Wellness</p>
+    <div id="dev-on-badge" class="dev-on-badge hidden"></div>
+  </header>
+
+  <div class="tabs">
+    <button class="tab active"   onclick="switchTab('today')">Today</button>
+    <button class="tab inactive" onclick="switchTab('vent')">😤 Vent</button>
+    <button class="tab inactive" onclick="switchTab('journal')">Journal</button>
+    <button class="tab inactive" onclick="switchTab('history')">History</button>
+    <button class="tab inactive" onclick="switchTab('clay')">😤 Vent</button>
+  </div>
+
+  <div class="privacy-banner">
+    <span>🔒</span>
+    <span style="font-size:.7rem;color:var(--dim)">Your data stays on this device unless you choose to export it.</span>
+  </div>
+
+  <!-- ═══ TODAY ═══ -->
+  <div id="tab-today" style="width:100%">
+    <div id="checkin-flow" style="width:100%">
+      <div class="progress" id="progress-bar"></div>
+      <div class="step-counter" id="step-counter"></div>
+      <div class="card" id="step-card"></div>
+    </div>
+    <div id="summary-view" class="hidden" style="width:100%">
+      <div class="card" id="summary-score-card" style="text-align:center"></div>
+      <div class="card hidden" id="chat-card" style="padding:0;overflow:hidden">
+        <div style="padding:.75rem 1rem;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:.5rem">
+          <div style="width:9px;height:9px;border-radius:50%;background:var(--green);box-shadow:0 0 6px #4ade8099"></div>
+          <span style="font-family:'Playfair Display',serif;color:var(--text);font-size:.9rem">Bloom</span>
+          <span style="color:var(--dim);font-size:.7rem">· your wellness companion</span>
+        </div>
+        <div id="chat-messages"></div>
+        <div style="padding:.75rem;border-top:1px solid var(--border);display:flex;gap:.5rem">
+          <input type="text" id="chat-input" placeholder="Reply to Bloom…" style="flex:1" onkeydown="if(event.key==='Enter')sendChat()"/>
+          <button class="btn btn-primary" onclick="sendChat()" style="padding:.55rem 1rem;font-size:.9rem">➤</button>
+        </div>
+      </div>
+      <div class="card" id="breakdown-card"></div>
+      <div class="card hidden" id="insights-card"></div>
+    </div>
+  </div>
+
+  <!-- ═══ VENT ═══ -->
+  <div id="tab-vent" class="hidden" style="width:100%">
+
+    <!-- Setup -->
+    <div id="vent-setup" class="card">
+      <p style="font-family:'Playfair Display',serif;font-size:1.3rem;color:var(--text);margin-bottom:.4rem">😤 Vent Station</p>
+      <p style="color:var(--dim);font-size:.82rem;line-height:1.55;margin-bottom:1.3rem">Sculpt someone from clay. Name them. Punch them into dust. It's just clay — no real harm, real relief.</p>
+
+      <p class="opt-label">Step 1 — Who is this clay person?</p>
+      <div style="display:flex;gap:.7rem;margin-bottom:1.3rem">
+        <button class="gender-btn" id="gbtn-male"   onclick="selectGender('male')">🧔<br/><span style="font-size:.75rem">Male</span></button>
+        <button class="gender-btn" id="gbtn-female" onclick="selectGender('female')">👩<br/><span style="font-size:.75rem">Female</span></button>
+        <button class="gender-btn" id="gbtn-other"  onclick="selectGender('other')">🧑<br/><span style="font-size:.75rem">Other</span></button>
+      </div>
+
+      <p class="opt-label">Step 2 — Give them a name</p>
+      <input type="text" id="vent-name-input" maxlength="20" placeholder="Their name (or leave blank)…" style="margin-bottom:1.3rem"/>
+
+      <button class="btn btn-gradient w100" onclick="startVent()" style="padding:.8rem;font-size:.95rem">🪨 Sculpt It</button>
+    </div>
+
+    <!-- Arena -->
+    <div id="vent-arena" class="hidden" style="width:100%">
+      <div id="vent-hp-bar-wrap">
+        <div id="vent-hp-bar"></div>
+        <div id="vent-hp-label"></div>
+      </div>
+      <div id="vent-status"></div>
+
+      <div id="vent-canvas-wrap">
+        <canvas id="vent-canvas"></canvas>
+        <div id="vent-nameplate"></div>
+        <div id="vent-hit-flash"></div>
+        <div id="vent-punch-text"></div>
+      </div>
+
+      <button id="vent-punch-btn" onclick="doPunch()">👊 PUNCH</button>
+      <div style="display:flex;gap:.6rem;margin-top:.8rem">
+        <button class="btn btn-secondary w100" onclick="resetVent()" style="font-size:.8rem;padding:.5rem">🔄 New Sculpt</button>
+        <button class="btn w100" id="vent-smash-btn" onclick="smashAll()" style="padding:.5rem;background:#7f1d1d;border:none;border-radius:11px;color:#fca5a5;font-size:.8rem;font-weight:600">💥 Obliterate</button>
+      </div>
+      <div class="card" style="margin-top:.8rem;background:#0a180a;border:1px solid #1a3a1a">
+        <p style="font-size:.78rem;color:#4ade8099;font-style:italic;text-align:center;line-height:1.6">"It's just clay. No real harm done. Let it out safely — then breathe." 🌱</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ JOURNAL ═══ -->
+  <div id="tab-journal" class="hidden" style="width:100%">
+    <div class="card">
+      <p class="section-label" style="margin-bottom:.8rem">New Journal Entry</p>
+      <input type="text" id="journal-title-input" placeholder="Title (optional)" style="margin-bottom:.7rem"/>
+      <textarea id="journal-body-input" rows="6" placeholder="What's on your mind? Write freely — this is just for you…" style="margin-bottom:.7rem;line-height:1.6"></textarea>
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <span style="font-size:.75rem;color:var(--dim)" id="journal-date-label"></span>
+        <button class="btn btn-gradient" onclick="saveJournalEntry()" style="padding:.55rem 1.2rem;font-size:.85rem">Save Entry ✓</button>
+      </div>
+    </div>
+    <div id="journal-list"></div>
+  </div>
+
+  <!-- ═══ HISTORY ═══ -->
+  <div id="tab-history" class="hidden" style="width:100%">
+    <div id="history-list"></div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════
+       TAB: CLAY SCULPT
+  ══════════════════════════════════════════════════ -->
+  <div id="tab-clay" class="hidden" style="width:100%">
+    <!-- Setup screen -->
+    <div id="clay-setup" style="width:100%">
+      <div class="card">
+        <p class="q-label" style="margin-bottom:.8rem">🧱 Create your stress sculpt</p>
+        <p style="color:var(--dim);font-size:.82rem;margin-bottom:1.2rem;line-height:1.5">Model a clay head, give it a name, then punch it until it breaks. Surprisingly satisfying stress relief.</p>
+        <p class="opt-label" style="margin-bottom:.6rem">Choose a head shape</p>
+        <div class="gender-options">
+          <button class="gender-opt" onclick="selectGender('male')" id="g-male"><span class="g-icon">👨</span>Male</button>
+          <button class="gender-opt" onclick="selectGender('female')" id="g-female"><span class="g-icon">👩</span>Female</button>
+          <button class="gender-opt" onclick="selectGender('round')" id="g-round"><span class="g-icon">🫥</span>Round</button>
+        </div>
+        <p class="opt-label" style="margin-bottom:.5rem">Name it <span style="color:var(--dimmer);font-weight:400">(optional)</span></p>
+        <input type="text" id="clay-name-input" maxlength="20" placeholder="Who&#39;s stressing you out?" style="margin-bottom:1.2rem"/>
+        <button class="btn btn-gradient" onclick="startClaySculpt()" id="clay-start-btn" style="width:100%;padding:.7rem;font-size:.95rem" disabled>
+          Sculpt &amp; Destroy →
+        </button>
+      </div>
+    </div>
+    <!-- Sculpt canvas -->
+    <div id="clay-scene" class="hidden" style="width:100%">
+      <div id="clay-canvas-wrap">
+        <canvas id="clay-canvas"></canvas>
+        <div id="clay-punch-rings" style="position:absolute;inset:0;pointer-events:none;overflow:hidden;border-radius:16px"></div>
+        <div id="clay-broken-msg">
+          <div style="font-size:3rem">💥</div>
+          <p style="font-family:'Playfair Display',serif;font-size:1.3rem;color:var(--text)">Completely destroyed.</p>
+          <p style="font-size:.85rem;color:var(--muted)">Hope that felt good 😤</p>
+          <button class="btn btn-gradient" onclick="resetClay()" style="padding:.6rem 1.4rem;font-size:.88rem;pointer-events:all">Make another one</button>
+        </div>
+        <div id="clay-status-flash"></div>
+        <div id="clay-ui-overlay">
+          <div id="clay-hp-label"><span id="clay-name-tag-label" style="font-weight:700">???</span><span id="clay-hp-pct">100%</span></div>
+          <div id="clay-hp-bar"><div id="clay-hp-fill" style="width:100%"></div></div>
+        </div>
+      </div>
+      <p style="font-size:.75rem;color:var(--dim);text-align:center;margin:.5rem 0 .3rem">Tap or click the head to punch it</p>
+      <div id="clay-controls">
+        <button class="clay-ctrl-btn" onclick="rotateClay(-1)">↺ Rotate</button>
+        <button class="clay-ctrl-btn" onclick="bigPunch()">👊 Big Punch</button>
+        <button class="clay-ctrl-btn" onclick="rotateClay(1)">↻ Rotate</button>
+        <button class="clay-ctrl-btn" onclick="resetClay()">🔄 New Sculpt</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="action-row">
+    <button class="btn btn-secondary" onclick="exportData()" style="flex:1;padding:.55rem;font-size:.75rem">⬇ Export JSON</button>
+    <button class="btn btn-danger" onclick="clearAllData()" style="flex:1;padding:.55rem;font-size:.75rem">🗑 Clear All</button>
+  </div>
+
+  <div class="dev-panel">
+    <button class="dev-btn" onclick="toggleDevPanel()" id="dev-toggle-btn">🛠 Open Developer Panel</button>
+    <div id="dev-inner" class="dev-inner hidden">
+      <p style="color:#3b6fc4;font-size:.72rem;text-transform:uppercase;letter-spacing:.1em;font-weight:700;margin-bottom:.4rem">🛠 Developer · Date Override</p>
+      <p style="color:#3b5a9e;font-size:.72rem;line-height:1.5;margin-bottom:.8rem">Set a custom date — the app acts as if that's today.</p>
+      <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
+        <input type="date" id="dev-date-input"/>
+        <button class="btn" onclick="applyDevDate()" style="padding:.45rem .9rem;background:#1e3a6e;border:none;border-radius:8px;color:#93c5fd;font-size:.8rem;font-weight:600">Apply</button>
+        <button class="btn" onclick="clearDevDate()" id="dev-clear-btn" style="padding:.45rem .7rem;background:transparent;border:1px solid var(--red);border-radius:8px;color:var(--red);font-size:.8rem">✕ Reset</button>
+      </div>
+      <div id="dev-active-badge" class="dev-badge hidden"></div>
+    </div>
+  </div>
+
+  <p style="color:#1a2540;font-size:.62rem;margin-top:1.5rem;text-align:center">MindBloom v4 · All data stored locally on this device</p>
+</div>
+
+<!-- JOURNAL MODAL -->
+<div class="modal-overlay hidden" id="journal-modal">
+  <div class="modal">
+    <p class="modal-title">Edit Journal Entry</p>
+    <input type="text" id="modal-title-input" placeholder="Title (optional)" style="margin-bottom:.7rem"/>
+    <textarea id="modal-body-input" rows="6" style="margin-bottom:1rem;line-height:1.6"></textarea>
+    <div style="display:flex;gap:.6rem;justify-content:flex-end">
+      <button class="btn btn-secondary" onclick="closeJournalModal()" style="padding:.5rem 1rem;font-size:.85rem">Cancel</button>
+      <button class="btn btn-gradient" onclick="saveJournalEdit()" style="padding:.5rem 1.2rem;font-size:.85rem">Save</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════
+// STORAGE
+// ═══════════════════════════════════════════════════
+const LS={
+  getEntries:()=>{try{return JSON.parse(localStorage.getItem('mindbloom_entries')||'[]')}catch{return[]}},
+  setEntries:(v)=>localStorage.setItem('mindbloom_entries',JSON.stringify(v)),
+  getJournal:()=>{try{return JSON.parse(localStorage.getItem('mindbloom_journal')||'[]')}catch{return[]}},
+  setJournal:(v)=>localStorage.setItem('mindbloom_journal',JSON.stringify(v)),
+  getDevDate:()=>localStorage.getItem('mindbloom_devdate')||null,
+  setDevDate:(v)=>v?localStorage.setItem('mindbloom_devdate',v):localStorage.removeItem('mindbloom_devdate'),
+};
+let entries=LS.getEntries(), journalEntries=LS.getJournal(), devDate=LS.getDevDate();
+let currentTab='today', survey={mood:5,stress:5,energy:5,sleep:5,social:5,tags:[],word:'',note:''};
+let currentStep=1; const TOTAL_STEPS=6;
+let chatMessages=[],chatSystemPrompt='',chatTyping=false, editingJournalId=null;
+
+// ═══════════════════════════════════════════════════
+// HELPERS
+// ═══════════════════════════════════════════════════
+const activeDate=()=>devDate||new Date().toISOString().slice(0,10);
+const todayEntry=()=>entries.find(e=>e.date===activeDate())||null;
+const std=(arr)=>{if(arr.length<2)return 0;const m=arr.reduce((a,b)=>a+b,0)/arr.length;return Math.sqrt(arr.reduce((a,b)=>a+(b-m)**2,0)/arr.length)};
+const correlation=(xs,ys)=>{const n=xs.length;if(n<2)return null;const mx=xs.reduce((a,b)=>a+b,0)/n,my=ys.reduce((a,b)=>a+b,0)/n;const num=xs.reduce((s,x,i)=>s+(x-mx)*(ys[i]-my),0);const den=Math.sqrt(xs.reduce((s,x)=>s+(x-mx)**2,0)*ys.reduce((s,y)=>s+(y-my)**2,0));return den?(num/den).toFixed(2):null};
+const wellnessScore=(e)=>Math.max(1,Math.min(10,+((e.mood+e.energy+e.sleep+e.social-e.stress)/5).toFixed(1)));
+const burnoutRisk=()=>{if(entries.length<3)return false;return entries.slice(-3).every(e=>e.stress>=7&&e.sleep<=4&&e.energy<=4)};
+const moodEmoji=(v)=>["😭","😢","😟","😕","😐","🙂","😊","😀","🤩","🌟"][Math.min(9,Math.max(0,v-1))];
+const scoreColor=(s)=>s>=7?'var(--green)':s>=5?'var(--yellow)':'var(--red)';
+const TAGS=["School","Work","Family","Friends","Health","Personal goals","Other"];
+const sliderBg=(v)=>`linear-gradient(to right,#818cf8 0%,#818cf8 ${(v-1)/9*100}%,#1e293b ${(v-1)/9*100}%,#1e293b 100%)`;
+const esc=(s)=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+const formatDate=(d)=>{const[y,m,day]=d.split('-');return `${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][+m-1]} ${+day}, ${y}`};
+
+// ═══════════════════════════════════════════════════
+// TABS
+// ═══════════════════════════════════════════════════
+function switchTab(tab){
+  currentTab=tab;
+  ['today','journal','history','clay'].forEach(t=>{
+    const el=document.getElementById('tab-'+t);
+    if(el) el.classList.toggle('hidden',t!==tab);
+  });
+  document.querySelectorAll('.tab').forEach((el,i)=>{
+    const tabs=['today','journal','history','clay'];
+    el.classList.toggle('active',tabs[i]===tab);
+    el.classList.toggle('inactive',tabs[i]!==tab);
+  });
+  if(tab==='journal')renderJournal();
+  if(tab==='history')renderHistory();
+  if(tab==='clay')initClayTab();
+}
+
+// ═══════════════════════════════════════════════════
+// SURVEY
+// ═══════════════════════════════════════════════════
+const STEPS_CONFIG=[
+  {key:'mood',label:'How was your overall mood today?',low:'Very Low',high:'Excellent',emoji:(v)=>moodEmoji(v)},
+  {key:'stress',label:'How stressed did you feel today?',low:'Not stressed',high:'Extremely stressed',emoji:(v)=>["😌","😌","😌","😐","😬","😬","😰","😰","🤯","🤯"][v-1]},
+  {key:'energy',label:'How was your energy level today?',low:'Exhausted',high:'Very energized',emoji:(v)=>["🪫","🪫","😴","😴","😐","😐","⚡","⚡","🔥","🔥"][v-1]},
+  {key:'sleep',label:'How well did you sleep last night?',low:'Terrible',high:'Great',emoji:(v)=>["😫","😫","😪","😪","😶","😶","😴","😴","💤","💤"][v-1]},
+  {key:'social',label:'Did you feel supported or connected today?',low:'Very alone',high:'Very supported',emoji:(v)=>["😔","😔","😶","😶","🙂","🙂","🤝","🤝","🫂","🫂"][v-1]},
+];
+
+function renderStep(){
+  const bar=document.getElementById('progress-bar');
+  bar.innerHTML=Array.from({length:TOTAL_STEPS},(_,i)=>`<div class="progress-seg" style="background:${i<currentStep?'var(--accent)':'var(--border)'}"></div>`).join('');
+  document.getElementById('step-counter').textContent=currentStep<TOTAL_STEPS?`Question ${currentStep} of ${TOTAL_STEPS-1}`:'Optional extras';
+  const card=document.getElementById('step-card');
+  if(currentStep<=5){
+    const cfg=STEPS_CONFIG[currentStep-1],val=survey[cfg.key];
+    card.innerHTML=`<p class="q-label">${esc(cfg.label)}</p>
+      <div class="slider-wrap">
+        <div class="slider-row"><span class="slider-label">${cfg.key.charAt(0).toUpperCase()+cfg.key.slice(1)}</span><span class="slider-emoji" id="sl-emoji">${cfg.emoji(val)}</span></div>
+        <input type="range" min="1" max="10" value="${val}" style="background:${sliderBg(val)}" oninput="updateSlider('${cfg.key}',this.value,this.style,'${currentStep}')"/>
+        <div class="slider-hints"><span>${esc(cfg.low)}</span><span class="slider-val" id="sl-val">${val}/10</span><span>${esc(cfg.high)}</span></div>
+      </div>
+      <div style="display:flex;gap:.8rem;margin-top:1rem">
+        ${currentStep>1?`<button class="btn btn-secondary w100" onclick="prevStep()">← Back</button>`:''}
+        <button class="btn btn-primary w100" onclick="nextStep()">Next →</button>
+      </div>`;
+  }else{
+    const tagHtml=TAGS.map(t=>`<button class="tag ${survey.tags.includes(t)?'active':''}" onclick="toggleTag('${t}')">${esc(t)}</button>`).join('');
+    card.innerHTML=`<p class="q-label">Almost done! 🌿</p>
+      <p class="opt-label">What influenced today? <span style="color:var(--dimmer);font-weight:400">(optional)</span></p>
+      <div class="tags-wrap">${tagHtml}</div>
+      <input type="text" maxlength="20" placeholder="One word to describe today… (optional)" value="${esc(survey.word)}" oninput="survey.word=this.value" style="margin-bottom:.8rem"/>
+      <p class="opt-label">Anything else you want to add? <span style="color:var(--dimmer);font-weight:400">(optional)</span></p>
+      <p style="color:var(--dimmer);font-size:.72rem;margin-bottom:.5rem">Bloom will read this 💬</p>
+      <textarea id="note-input" rows="3" placeholder="Share whatever's on your mind…">${esc(survey.note)}</textarea>
+      <div style="display:flex;gap:.8rem;margin-top:1.1rem">
+        <button class="btn btn-secondary w100" onclick="prevStep()">← Back</button>
+        <button class="btn w100" style="background:linear-gradient(135deg,var(--accent),var(--accent2));color:#0f172a;font-weight:700;font-size:.9rem" onclick="submitSurvey()">Submit ✓</button>
+      </div>`;
+    setTimeout(()=>{const ni=document.getElementById('note-input');if(ni){ni.value=survey.note;ni.oninput=()=>survey.note=ni.value}},0);
+  }
+}
+
+function updateSlider(key,val,style,step){survey[key]=+val;style.background=sliderBg(+val);const cfg=STEPS_CONFIG[+step-1];const e=document.getElementById('sl-emoji'),v=document.getElementById('sl-val');if(e)e.textContent=cfg.emoji(+val);if(v)v.textContent=`${val}/10`}
+function toggleTag(t){if(survey.tags.includes(t))survey.tags=survey.tags.filter(x=>x!==t);else survey.tags.push(t);document.querySelectorAll('.tag').forEach(el=>el.classList.toggle('active',survey.tags.includes(el.textContent)))}
+function nextStep(){if(currentStep<TOTAL_STEPS){currentStep++;renderStep()}}
+function prevStep(){if(currentStep>1){currentStep--;renderStep()}}
+function submitSurvey(){const ni=document.getElementById('note-input');if(ni)survey.note=ni.value;const entry={date:activeDate(),mood:survey.mood,stress:survey.stress,energy:survey.energy,sleep:survey.sleep,social:survey.social,tags:[...survey.tags],word:survey.word,note:survey.note,ts:Date.now()};entries=[...entries.filter(e=>e.date!==activeDate()),entry].sort((a,b)=>a.ts-b.ts);LS.setEntries(entries);showSummary(entry,true)}
+
+// ═══════════════════════════════════════════════════
+// SUMMARY
+// ═══════════════════════════════════════════════════
+function showSummary(entry,openChat){
+  document.getElementById('checkin-flow').classList.add('hidden');
+  document.getElementById('summary-view').classList.remove('hidden');
+  const ws=wellnessScore(entry),risk=burnoutRisk();
+  document.getElementById('summary-score-card').innerHTML=`
+    ${risk?`<div class="burnout-alert">⚠️ <strong>Burnout risk detected</strong> — 3 tough days in a row. Be gentle with yourself.</div>`:''}
+    <p class="section-label" style="margin-bottom:.4rem">${activeDate()===new Date().toISOString().slice(0,10)?"Today's":formatDate(activeDate())+" ·"} Wellness Score</p>
+    <div class="score-big" style="color:${scoreColor(ws)}">${ws}<span class="score-denom">/10</span></div>
+    <div style="font-size:2.2rem;margin-top:.4rem">${moodEmoji(entry.mood)}</div>
+    ${entry.word?`<p style="color:var(--accent);font-style:italic;margin-top:.4rem;font-size:.9rem">"${esc(entry.word)}"</p>`:''}
+    <button class="chat-open-btn" id="chat-open-btn" onclick="openChat()">💬 Chat with Bloom</button>`;
+  const bars=[['Mood',entry.mood,'😊'],['Stress',entry.stress,'😬'],['Energy',entry.energy,'⚡'],['Sleep',entry.sleep,'💤'],['Social',entry.social,'🤝']].map(([l,v,e])=>`<div class="bar-row"><span style="width:20px;text-align:center">${e}</span><span style="flex:1;font-size:.8rem;color:var(--muted)">${l}</span><div class="bar-track"><div class="bar-fill" style="width:${v*10}%"></div></div><span style="width:24px;text-align:right;font-size:.8rem;color:var(--accent);font-weight:600">${v}</span></div>`).join('');
+  const th=entry.tags?.length?`<hr class="divider"/><p class="section-label">Influences</p><div style="display:flex;flex-wrap:wrap;gap:4px">${entry.tags.map(t=>`<span class="tag-badge">${esc(t)}</span>`).join('')}</div>`:'';
+  const nh=entry.note?`<hr class="divider"/><p class="section-label">Your Note</p><p style="color:var(--muted);font-size:.82rem;line-height:1.55;font-style:italic">"${esc(entry.note)}"</p>`:'';
+  document.getElementById('breakdown-card').innerHTML=`<p class="section-label">Today's Breakdown</p>${bars}${th}${nh}`;
+  if(entries.length>1){const v=std(entries.slice(-7).map(e=>e.mood)).toFixed(2),c=correlation(entries.map(e=>e.stress),entries.map(e=>e.sleep));const ic=document.getElementById('insights-card');ic.classList.remove('hidden');ic.innerHTML=`<p class="section-label">Insights</p><div class="insight-grid"><div class="insight-tile"><div class="insight-val">${v}σ</div><div class="insight-name">Mood Volatility</div><div class="insight-sub">last 7 days</div></div><div class="insight-tile"><div class="insight-val">${c||'—'}</div><div class="insight-name">Stress↔Sleep</div><div class="insight-sub">correlation</div></div><div class="insight-tile"><div class="insight-val">${entries.length}</div><div class="insight-name">Days Tracked</div><div class="insight-sub">total entries</div></div></div>`}
+  if(openChat)setTimeout(()=>openChatPanel(entry),400);
+}
+
+// ═══════════════════════════════════════════════════
+// AI CHAT
+// ═══════════════════════════════════════════════════
+function buildSP(e){const ws=wellnessScore(e),risk=burnoutRisk(),last3=entries.slice(-3).map(x=>wellnessScore(x)),trend=entries.length>=3?(last3[2]>last3[0]+.5?'improving':last3[2]<last3[0]-.5?'declining':'stable'):'unknown';return`You are Bloom, a warm emotionally intelligent wellness companion. Your ONE goal: make this person feel genuinely better.\n\nTODAY: Wellness ${ws}/10 | Mood ${e.mood} | Stress ${e.stress} | Energy ${e.energy} | Sleep ${e.sleep} | Social ${e.social} | Tags: ${e.tags?.join(',')||'none'} | Word: ${e.word||'–'} | Note: "${e.note||'nothing'}" | Burnout risk: ${risk?'YES (3 days high stress+low sleep+low energy)':'no'} | Trend: ${trend} | Days tracked: ${entries.length}\n\nBE: Warm, real, teen-friendly, casual. Match energy to score (low→comfort first; high→hype!). Reference their data specifically. Respond directly to their note if they wrote one. First message 2-4 sentences MAX. No toxic positivity. One follow-up question at a time. Goal: they feel heard and better.`}
+async function callClaude(msgs,sys){try{const r=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:1000,system:sys,messages:msgs})});const d=await r.json();return d.content?.map(b=>b.text||'').join('')||"I'm here for you 💙"}catch{return "Having trouble connecting right now, but I'm here for you 💙"}}
+function openChat(){const e=todayEntry();if(e)openChatPanel(e)}
+async function openChatPanel(e){const card=document.getElementById('chat-card'),btn=document.getElementById('chat-open-btn');if(btn)btn.style.display='none';card.classList.remove('hidden');chatMessages=[];chatSystemPrompt=buildSP(e);document.getElementById('chat-messages').innerHTML='';appendTyping();const r=await callClaude([],chatSystemPrompt);removeTyping();chatMessages.push({role:'assistant',content:r});appendBubble('assistant',r)}
+async function sendChat(){const inp=document.getElementById('chat-input'),text=inp.value.trim();if(!text||chatTyping)return;inp.value='';chatMessages.push({role:'user',content:text});appendBubble('user',text);chatTyping=true;appendTyping();const r=await callClaude(chatMessages,chatSystemPrompt);removeTyping();chatTyping=false;chatMessages.push({role:'assistant',content:r});appendBubble('assistant',r)}
+function appendBubble(role,text){const msgs=document.getElementById('chat-messages'),isAI=role==='assistant',div=document.createElement('div');div.className=`bubble-wrap ${isAI?'':'user'} fade-in`;div.innerHTML=isAI?`<div class="avatar">🌱</div><div class="bubble ai">${esc(text)}</div>`:`<div class="bubble user">${esc(text)}</div>`;msgs.appendChild(div);msgs.scrollTop=msgs.scrollHeight}
+function appendTyping(){const msgs=document.getElementById('chat-messages'),div=document.createElement('div');div.className='bubble-wrap';div.id='typing-indicator';div.innerHTML=`<div class="avatar">🌱</div><div class="bubble ai"><div class="typing-dots"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div></div>`;msgs.appendChild(div);msgs.scrollTop=msgs.scrollHeight}
+function removeTyping(){const t=document.getElementById('typing-indicator');if(t)t.remove()}
+
+// ═══════════════════════════════════════════════════
+// JOURNAL
+// ═══════════════════════════════════════════════════
+function saveJournalEntry(){const ti=document.getElementById('journal-title-input'),bi=document.getElementById('journal-body-input'),body=bi.value.trim();if(!body){bi.style.borderColor='var(--red)';setTimeout(()=>bi.style.borderColor='',1500);return}journalEntries=[{id:Date.now().toString(),date:activeDate(),title:ti.value.trim(),body,ts:Date.now(),linkedWellness:todayEntry()?wellnessScore(todayEntry()):null,linkedMood:todayEntry()?todayEntry().mood:null},...journalEntries];LS.setJournal(journalEntries);ti.value='';bi.value='';renderJournal()}
+function deleteJournalEntry(id){if(!confirm('Delete this journal entry?'))return;journalEntries=journalEntries.filter(e=>e.id!==id);LS.setJournal(journalEntries);renderJournal()}
+function openEditModal(id){const e=journalEntries.find(x=>x.id===id);if(!e)return;editingJournalId=id;document.getElementById('modal-title-input').value=e.title||'';document.getElementById('modal-body-input').value=e.body||'';document.getElementById('journal-modal').classList.remove('hidden')}
+function closeJournalModal(){document.getElementById('journal-modal').classList.add('hidden');editingJournalId=null}
+function saveJournalEdit(){if(!editingJournalId)return;const t=document.getElementById('modal-title-input').value.trim(),b=document.getElementById('modal-body-input').value.trim();if(!b)return;journalEntries=journalEntries.map(e=>e.id===editingJournalId?{...e,title:t,body:b}:e);LS.setJournal(journalEntries);closeJournalModal();renderJournal()}
+function renderJournal(){const l=document.getElementById('journal-date-label');if(l)l.textContent=formatDate(activeDate());const list=document.getElementById('journal-list');if(!list)return;if(!journalEntries.length){list.innerHTML=`<div class="empty-state"><div class="icon">📓</div><p>No journal entries yet.</p><p style="font-size:.8rem;margin-top:.4rem">Write your first one above!</p></div>`;return}list.innerHTML=journalEntries.map(e=>`<div class="card fade-in"><div class="journal-entry"><div class="journal-date">${formatDate(e.date)}</div>${e.title?`<div class="journal-title">${esc(e.title)}</div>`:''}<div class="journal-body">${esc(e.body)}</div>${e.linkedWellness?`<div class="journal-mood-badge">${moodEmoji(e.linkedMood||5)} Wellness ${e.linkedWellness}/10 that day</div>`:''}</div><div style="display:flex;gap:.5rem;margin-top:.8rem;justify-content:flex-end"><button class="btn btn-secondary" onclick="openEditModal('${esc(e.id)}')" style="padding:.35rem .8rem;font-size:.75rem">✏️ Edit</button><button class="btn btn-danger" onclick="deleteJournalEntry('${esc(e.id)}')" style="padding:.35rem .8rem;font-size:.75rem">🗑</button></div></div>`).join('')}
+
+// ═══════════════════════════════════════════════════
+// HISTORY
+// ═══════════════════════════════════════════════════
+function renderHistory(){const list=document.getElementById('history-list');if(!entries.length){list.innerHTML=`<div class="empty-state"><div class="icon">📅</div><p>No check-ins yet.</p></div>`;return}list.innerHTML=entries.slice().reverse().map(e=>{const ws=wellnessScore(e),th=e.tags?.length?`<div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:.5rem">${e.tags.map(t=>`<span class="tag-badge">${esc(t)}</span>`).join('')}</div>`:'',nh=e.note?`<p style="color:var(--dim);font-size:.75rem;margin-top:.5rem;font-style:italic">"${esc(e.note)}"</p>`:'';return`<div class="card fade-in"><div style="display:flex;justify-content:space-between;align-items:center"><span style="font-family:'Playfair Display',serif;color:var(--text);font-size:.9rem">${formatDate(e.date)}</span><div style="display:flex;align-items:center;gap:.5rem">${e.word?`<span style="color:var(--dim);font-size:.75rem;font-style:italic">"${esc(e.word)}"</span>`:''}<span style="font-weight:700;color:${scoreColor(ws)};font-size:1rem">${ws}/10</span></div></div><div class="history-badges"><span class="badge">😊${e.mood}</span><span class="badge">😬${e.stress}</span><span class="badge">⚡${e.energy}</span><span class="badge">💤${e.sleep}</span><span class="badge">🤝${e.social}</span></div>${th}${nh}</div>`}).join('')}
+
+// ═══════════════════════════════════════════════════
+// EXPORT
+// ═══════════════════════════════════════════════════
+function exportData(){const data={exported:new Date().toISOString(),app:'MindBloom v4',wellness_entries:entries,journal_entries:journalEntries};const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=`mindbloom-export-${activeDate()}.json`;document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(url)}
+
+// ═══════════════════════════════════════════════════
+// CLEAR ALL
+// ═══════════════════════════════════════════════════
+function clearAllData(){if(!confirm('Clear ALL data? Cannot be undone.'))return;entries=[];journalEntries=[];LS.setEntries([]);LS.setJournal([]);survey={mood:5,stress:5,energy:5,sleep:5,social:5,tags:[],word:'',note:''};currentStep=1;document.getElementById('summary-view').classList.add('hidden');document.getElementById('checkin-flow').classList.remove('hidden');['chat-card','insights-card'].forEach(id=>document.getElementById(id).classList.add('hidden'));renderStep();switchTab('today')}
+
+// ═══════════════════════════════════════════════════
+// DEV PANEL
+// ═══════════════════════════════════════════════════
+let devPanelOpen=false;
+function toggleDevPanel(){devPanelOpen=!devPanelOpen;document.getElementById('dev-inner').classList.toggle('hidden',!devPanelOpen);document.getElementById('dev-toggle-btn').textContent=`🛠 ${devPanelOpen?'Hide':'Open'} Developer Panel`}
+function applyDevDate(){devDate=document.getElementById('dev-date-input').value||null;LS.setDevDate(devDate);updateDevUI();reloadForDate()}
+function clearDevDate(){devDate=null;document.getElementById('dev-date-input').value='';LS.setDevDate(null);updateDevUI();reloadForDate()}
+function updateDevUI(){const b=document.getElementById('dev-active-badge'),c=document.getElementById('dev-clear-btn'),h=document.getElementById('dev-on-badge');if(devDate){b.classList.remove('hidden');b.innerHTML=`📅 Acting as <strong style="margin-left:.3rem">${devDate}</strong>`;c.classList.remove('hidden');h.classList.remove('hidden');h.textContent=`🛠 Dev · ${devDate}`}else{b.classList.add('hidden');c.classList.add('hidden');h.classList.add('hidden')}}
+function reloadForDate(){const e=todayEntry();chatMessages=[];document.getElementById('chat-card').classList.add('hidden');document.getElementById('chat-messages').innerHTML='';if(e){document.getElementById('checkin-flow').classList.add('hidden');document.getElementById('summary-view').classList.remove('hidden');showSummary(e,false)}else{document.getElementById('summary-view').classList.add('hidden');document.getElementById('insights-card').classList.add('hidden');document.getElementById('checkin-flow').classList.remove('hidden');survey={mood:5,stress:5,energy:5,sleep:5,social:5,tags:[],word:'',note:''};currentStep=1;renderStep()}}
+
+// ═══════════════════════════════════════════════════════════════════════
+// VENT — 3D CLAY HEAD  (Three.js r128)
+// ═══════════════════════════════════════════════════════════════════════
+let V = {
+  scene:null, camera:null, renderer:null, headGroup:null, animFrame:null,
+  gender:null, name:'', hp:100, maxHp:100, dead:false, cracks:[], headMesh:null
+};
+
+const PUNCH_WORDS = ['CRACK!','POW!','SMASH!','BAM!','CRUNCH!','WHACK!','THUD!','SNAP!','WHAM!','KER-POW!'];
+
+function selectGender(g){
+  V.gender=g;
+  document.querySelectorAll('.gender-btn').forEach(b=>b.classList.remove('selected'));
+  document.getElementById('gbtn-'+g).classList.add('selected');
+}
+
+function initVentTab(){
+  if(!V.headGroup){
+    document.getElementById('vent-setup').classList.remove('hidden');
+    document.getElementById('vent-arena').classList.add('hidden');
+  }
+}
+
+function startVent(){
+  if(!V.gender){alert('Pick a gender first!');return}
+  V.name=document.getElementById('vent-name-input').value.trim()||'Unknown';
+  V.hp=100; V.maxHp=100; V.dead=false; V.cracks=[];
+  document.getElementById('vent-setup').classList.add('hidden');
+  document.getElementById('vent-arena').classList.remove('hidden');
+  document.getElementById('vent-nameplate').textContent=V.name;
+  document.getElementById('vent-punch-btn').disabled=false;
+  document.getElementById('vent-smash-btn').style.display='';
+  updateHP(); setStatus('Ready. Let it out. 👊');
+  buildScene();
+}
+
+function buildScene(){
+  if(V.animFrame)cancelAnimationFrame(V.animFrame);
+  if(V.renderer){V.renderer.dispose()}
+
+  const wrap=document.getElementById('vent-canvas-wrap');
+  const canvas=document.getElementById('vent-canvas');
+  const W=wrap.clientWidth||360, H=wrap.clientHeight||360;
+
+  V.scene=new THREE.Scene();
+  V.camera=new THREE.PerspectiveCamera(44,W/H,.1,100);
+  V.camera.position.set(0,.4,4.8);
+  V.camera.lookAt(0,.15,0);
+
+  V.renderer=new THREE.WebGLRenderer({canvas,antialias:true,alpha:true});
+  V.renderer.setSize(W,H);
+  V.renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
+  V.renderer.shadowMap.enabled=true;
+
+  // Lighting
+  V.scene.add(new THREE.AmbientLight(0xfff0e0,.55));
+  const dl=new THREE.DirectionalLight(0xffeedd,1.3);
+  dl.position.set(3,6,4); dl.castShadow=true; V.scene.add(dl);
+  const rl=new THREE.DirectionalLight(0x9090ff,.35);
+  rl.position.set(-4,2,-3); V.scene.add(rl);
+
+  buildHead3D();
+
+  // Pedestal
+  const ped=new THREE.Mesh(
+    new THREE.CylinderGeometry(.72,.92,.32,20),
+    new THREE.MeshLambertMaterial({color:0x5a3010})
+  );
+  ped.position.set(0,-1.72,0); V.scene.add(ped);
+
+  // Floating dust particles
+  const pv=[];
+  for(let i=0;i<100;i++)pv.push((Math.random()-.5)*7,(Math.random()-.5)*5,(Math.random()-.5)*4);
+  const partGeo=new THREE.BufferGeometry();
+  partGeo.setAttribute('position',new THREE.Float32BufferAttribute(pv,3));
+  V.scene.add(new THREE.Points(partGeo,new THREE.PointsMaterial({color:0xc8a882,size:.028,transparent:true,opacity:.35})));
+
+  loopRender();
+}
+
+function buildHead3D(){
+  if(V.headGroup)V.scene.remove(V.headGroup);
+  V.headGroup=new THREE.Group();
+  V.cracks=[];
+
+  const isFemale=V.gender==='female';
+  const clayHue=isFemale?0xdda87a:V.gender==='male'?0xcc8855:0xc9a060;
+  const clay=new THREE.MeshLambertMaterial({color:clayHue});
+  const dark=new THREE.MeshLambertMaterial({color:0x7a3a10});
+  const hair=new THREE.MeshLambertMaterial({color:isFemale?0x3d1a05:0x2a1205});
+  const eye=new THREE.MeshLambertMaterial({color:0x111122});
+
+  // Head
+  const hg=new THREE.SphereGeometry(.73,28,22);
+  V.headMesh=new THREE.Mesh(hg,clay);
+  V.headMesh.scale.set(isFemale?.93:1.08, isFemale?1.07:1.0, isFemale?.96:1.0);
+  V.headMesh.castShadow=true;
+  V.headGroup.add(V.headMesh);
+
+  // Neck
+  V.headGroup.add(mkMesh(new THREE.CylinderGeometry(isFemale?.21:.27,isFemale?.27:.33,.48,14),clay,[0,-.9,0]));
+
+  // Eyes
+  [-0.23,0.23].forEach(x=>V.headGroup.add(mkMesh(new THREE.SphereGeometry(.072,10,8),eye,[x,.1,.64])));
+
+  // Eyebrows
+  [-0.23,0.23].forEach(x=>{
+    const bm=new THREE.Mesh(new THREE.SphereGeometry(.05,6,4),dark);
+    bm.position.set(x,.27,.6); bm.scale.set(1.8,.4,1); V.headGroup.add(bm);
+  });
+
+  // Nose
+  const nm=new THREE.Mesh(new THREE.SphereGeometry(isFemale?.065:.09,8,6),dark);
+  nm.position.set(0,-.07,.7); nm.scale.set(1,.65,.75); V.headGroup.add(nm);
+
+  // Nostrils
+  [-0.055,0.055].forEach(x=>{
+    const n=new THREE.Mesh(new THREE.SphereGeometry(.025,6,4),dark);
+    n.position.set(x,-.13,.68); V.headGroup.add(n);
+  });
+
+  // Mouth
+  const mouth=new THREE.Mesh(new THREE.TorusGeometry(isFemale?.13:.16,.022,6,16,Math.PI),dark);
+  mouth.position.set(0,-.3,.63); mouth.rotation.z=Math.PI; V.headGroup.add(mouth);
+
+  // Ears
+  [-0.74,0.74].forEach(x=>{
+    const em=new THREE.Mesh(new THREE.SphereGeometry(.125,10,8),clay);
+    em.position.set(x*(isFemale?.94:1),.04,0); em.scale.set(.48,.78,.55); V.headGroup.add(em);
+  });
+
+  // GENDER-SPECIFIC HAIR
+  if(isFemale){
+    // Hair bun on top back
+    const bun=new THREE.Mesh(new THREE.SphereGeometry(.3,14,10),hair);
+    bun.position.set(0,.88,-.12); V.headGroup.add(bun);
+    // Side curtain hair
+    [-0.48,0.48].forEach(x=>{
+      const sh=new THREE.Mesh(new THREE.SphereGeometry(.24,10,8),hair);
+      sh.position.set(x,.28,-.05); sh.scale.set(.55,1.2,.65); V.headGroup.add(sh);
+    });
+    // Front fringe
+    for(let i=0;i<5;i++){
+      const fr=new THREE.Mesh(new THREE.SphereGeometry(.1,6,5),hair);
+      fr.position.set(-.3+i*.15,.58,.4+Math.random()*.1); fr.scale.set(1,.5,1); V.headGroup.add(fr);
+    }
+  } else if(V.gender==='male'){
+    // Short cropped hair
+    for(let i=0;i<16;i++){
+      const a=(i/16)*Math.PI*2;
+      const hm=new THREE.Mesh(new THREE.SphereGeometry(.095,5,4),hair);
+      hm.position.set(Math.cos(a)*.52,.66+Math.random()*.08,Math.sin(a)*.33);
+      hm.scale.set(1,.45,1); V.headGroup.add(hm);
+    }
+    // Top center
+    for(let i=0;i<5;i++){
+      const hm=new THREE.Mesh(new THREE.SphereGeometry(.09,5,4),hair);
+      hm.position.set((Math.random()-.5)*.3,.76,.05+(Math.random()-.5)*.25);
+      hm.scale.set(1,.5,1); V.headGroup.add(hm);
+    }
+  } else {
+    // Other: medium length wavy hair
+    for(let i=0;i<20;i++){
+      const a=(i/20)*Math.PI*2;
+      const hm=new THREE.Mesh(new THREE.SphereGeometry(.1,5,4),hair);
+      const r=.55+Math.random()*.05;
+      hm.position.set(Math.cos(a)*r,.5+Math.random()*.2,Math.sin(a)*r*.6);
+      hm.scale.set(1,.6+Math.random()*.4,1); V.headGroup.add(hm);
+    }
+  }
+
+  V.headGroup.position.set(0,-.1,0);
+  V.scene.add(V.headGroup);
+}
+
+function mkMesh(geo,mat,pos){const m=new THREE.Mesh(geo,mat);if(pos)m.position.set(...pos);return m}
+
+function loopRender(){
+  V.animFrame=requestAnimationFrame(loopRender);
+  if(V.headGroup&&!V.dead){
+    V.headGroup.rotation.y=Math.sin(Date.now()*.0004)*.2;
+    V.headGroup.rotation.x=Math.sin(Date.now()*.00025)*.04;
+  }
+  if(V.renderer)V.renderer.render(V.scene,V.camera);
+}
+
+function doPunch(){
+  if(V.dead)return;
+  const dmg=8+Math.floor(Math.random()*14);
+  V.hp=Math.max(0,V.hp-dmg);
+  updateHP();
+
+  // Flash
+  const flash=document.getElementById('vent-hit-flash');
+  const px=25+Math.random()*50, py=15+Math.random()*55;
+  flash.style.setProperty('--fx',px+'%');
+  flash.style.setProperty('--fy',py+'%');
+  flash.style.opacity='1';
+  setTimeout(()=>flash.style.opacity='0',130);
+
+  // Punch word
+  showWord(PUNCH_WORDS[Math.floor(Math.random()*PUNCH_WORDS.length)]);
+
+  // Shake
+  shakeHead3D();
+
+  // Deform
+  dentHead3D(dmg);
+
+  // Particles
+  spawnParticles(px,py);
+
+  if(V.hp<=0) smashHead();
+  else if(V.hp<30) setStatus('Barely holding together... finish it 💥');
+  else if(V.hp<60) setStatus('Cracks forming... they\'re feeling it 😤');
+  else setStatus(['Let it out!','Again!','That felt good?','Keep going!','Nice hit!'][Math.floor(Math.random()*5)]);
+}
+
+function shakeHead3D(){
+  if(!V.headGroup)return;
+  let t=0;
+  const id=setInterval(()=>{
+    t++;
+    const s=.16*(1-t/9);
+    V.headGroup.position.x=(Math.random()-.5)*s;
+    V.headGroup.position.y=-.1+(Math.random()-.5)*s*.5;
+    if(t>=9){V.headGroup.position.x=0;V.headGroup.position.y=-.1;clearInterval(id)}
+  },28);
+}
+
+function dentHead3D(dmg){
+  if(!V.headMesh)return;
+  // Randomly squash one axis
+  const axes=['x','y','z'];
+  const ax=axes[Math.floor(Math.random()*3)];
+  V.headMesh.scale[ax]=Math.max(.42,V.headMesh.scale[ax]-.022);
+
+  // Add crack blob
+  if(V.hp>0&&Math.random()<.75){
+    const cg=new THREE.SphereGeometry(.028+Math.random()*.035,6,4);
+    const cm=new THREE.MeshLambertMaterial({color:0x3d1800});
+    const crack=new THREE.Mesh(cg,cm);
+    const a=Math.random()*Math.PI*2, r=.38+Math.random()*.32;
+    crack.position.set(Math.cos(a)*r,(Math.random()-.5)*.85,Math.sin(a)*r*.7+.28);
+    crack.scale.set(1,.25,3+Math.random()*3);
+    crack.rotation.set(Math.random()*Math.PI,Math.random()*Math.PI,Math.random()*Math.PI);
+    V.headGroup.add(crack);
+    V.cracks.push(crack);
+  }
+}
+
+function smashHead(){
+  V.dead=true;
+  document.getElementById('vent-punch-btn').disabled=true;
+  document.getElementById('vent-smash-btn').style.display='none';
+  showWord('💥 SMASHED!');
+  setStatus('Done. You let it out. Now breathe. 🌱');
+
+  if(V.headGroup){
+    V.headGroup.children.forEach(child=>{
+      const vx=(Math.random()-.5)*.18,vy=.09+Math.random()*.14,vz=(Math.random()-.5)*.12;
+      let t=0;
+      const id=setInterval(()=>{
+        t++;
+        child.position.x+=vx; child.position.y+=vy-t*.013; child.position.z+=vz;
+        child.rotation.x+=.09; child.rotation.y+=.07; child.rotation.z+=.05;
+        child.scale.multiplyScalar(.975);
+        if(t>42||child.position.y<-3.5){child.visible=false;clearInterval(id)}
+      },18);
+    });
+  }
+
+  setTimeout(()=>setStatus('👊 All done. Anger released safely. Take a deep breath now. 🌿'),1600);
+}
+
+function smashAll(){if(!V.dead){V.hp=1;doPunch()}}
+
+function showWord(w){
+  const el=document.getElementById('vent-punch-text');
+  el.textContent=w; el.style.animation='none';
+  requestAnimationFrame(()=>{
+    el.style.animation='punchPop .7s ease-out forwards';
+  });
+}
+
+function spawnParticles(px,py){
+  const wrap=document.getElementById('vent-canvas-wrap');
+  for(let i=0;i<10;i++){
+    const p=document.createElement('div');
+    p.className='crack-particle';
+    const sz=3+Math.random()*5;
+    const dx=(Math.random()-.5)*130, dy=(Math.random()-.5)*90-25;
+    p.style.cssText=`width:${sz}px;height:${sz}px;left:${px}%;top:${py}%;--dx:${dx}px;--dy:${dy}px;animation:particleFly .65s ease-out forwards;position:absolute;`;
+    wrap.appendChild(p);
+    setTimeout(()=>p.remove(),750);
+  }
+}
+
+function updateHP(){
+  const bar=document.getElementById('vent-hp-bar'),pct=Math.max(0,V.hp/V.maxHp*100);
+  bar.style.width=pct+'%';
+  bar.style.background=pct>60?'#4ade80':pct>30?'#facc15':'#ef4444';
+  document.getElementById('vent-hp-label').textContent=`${Math.round(pct)}%`;
+}
+
+function setStatus(msg){document.getElementById('vent-status').textContent=msg}
+
+function resetVent(){
+  if(V.animFrame)cancelAnimationFrame(V.animFrame);
+  if(V.renderer)V.renderer.dispose();
+  V={scene:null,camera:null,renderer:null,headGroup:null,animFrame:null,gender:null,name:'',hp:100,maxHp:100,dead:false,cracks:[],headMesh:null};
+  document.querySelectorAll('.gender-btn').forEach(b=>b.classList.remove('selected'));
+  document.getElementById('vent-name-input').value='';
+  document.getElementById('vent-setup').classList.remove('hidden');
+  document.getElementById('vent-arena').classList.add('hidden');
+}
+
+// ═══════════════════════════════════════════════════
+// INIT
+// ═══════════════════════════════════════════════════
+function init(){
+  if(devDate){document.getElementById('dev-date-input').value=devDate;updateDevUI()}
+  const jl=document.getElementById('journal-date-label');
+  if(jl)jl.textContent=formatDate(activeDate());
+  const e=todayEntry();
+  if(e){document.getElementById('checkin-flow').classList.add('hidden');showSummary(e,false)}
+  else renderStep();
+}
+init();
+</script>
+</body>
+</html>

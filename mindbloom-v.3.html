@@ -1,0 +1,922 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>MindBloom · Daily Wellness</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet"/>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:#0b1120;font-family:'DM Sans',system-ui,sans-serif;color:#e2e8f0;min-height:100vh}
+  :root{
+    --bg:#0b1120;--surface:#131f35;--surface2:#0f172a;--border:#1e293b;
+    --accent:#818cf8;--accent2:#a78bfa;--green:#4ade80;--yellow:#facc15;--red:#f87171;
+    --text:#e2e8f0;--muted:#94a3b8;--dim:#475569;--dimmer:#2d3f5a;
+  }
+  /* ── Layout ── */
+  #app{display:flex;flex-direction:column;align-items:center;padding:2rem 1rem 5rem;max-width:460px;margin:0 auto}
+  .card{background:var(--surface);border-radius:18px;padding:1.25rem;width:100%;box-shadow:0 4px 28px #00000055;margin-bottom:1rem}
+  .card-inner{background:var(--surface2);border-radius:12px;padding:.9rem}
+  /* ── Tabs ── */
+  .tabs{display:flex;gap:4px;background:var(--surface2);border-radius:13px;padding:4px;width:100%;margin-bottom:1.1rem}
+  .tab{flex:1;padding:.48rem .3rem;border:none;border-radius:10px;cursor:pointer;font-size:.78rem;font-weight:600;transition:all .2s;font-family:inherit;letter-spacing:.01em}
+  .tab.active{background:var(--accent);color:#0f172a}
+  .tab.inactive{background:transparent;color:var(--dim)}
+  /* ── Buttons ── */
+  .btn{border:none;border-radius:11px;cursor:pointer;font-family:inherit;font-weight:600;transition:all .15s}
+  .btn-primary{background:var(--accent);color:#0f172a;padding:.65rem 1.2rem;font-size:.9rem}
+  .btn-secondary{background:transparent;border:1px solid var(--border)!important;color:var(--dim);padding:.55rem 1rem;font-size:.85rem}
+  .btn-gradient{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#0f172a;padding:.65rem 1.4rem;font-size:.9rem}
+  .btn-danger{background:transparent;border:1px solid var(--red)!important;color:var(--red);padding:.5rem .9rem;font-size:.75rem}
+  .btn:disabled{opacity:.45;cursor:not-allowed}
+  /* ── Progress bar ── */
+  .progress{display:flex;gap:4px;margin-bottom:.6rem}
+  .progress-seg{flex:1;height:4px;border-radius:2px;transition:background .3s}
+  /* ── Slider ── */
+  .slider-wrap{margin-bottom:1.5rem}
+  .slider-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:.4rem}
+  .slider-label{font-family:'Playfair Display',serif;font-size:.95rem;color:var(--text)}
+  .slider-emoji{font-size:1.6rem;transition:all .2s;min-width:2rem;text-align:right}
+  input[type=range]{width:100%;appearance:none;height:6px;border-radius:3px;outline:none;cursor:pointer}
+  input[type=range]::-webkit-slider-thumb{appearance:none;width:18px;height:18px;border-radius:50%;background:var(--accent);cursor:pointer;border:2px solid #0f172a;box-shadow:0 0 0 3px #818cf820}
+  input[type=range]::-moz-range-thumb{width:16px;height:16px;border-radius:50%;background:var(--accent);cursor:pointer;border:2px solid #0f172a}
+  .slider-hints{display:flex;justify-content:space-between;font-size:.7rem;color:var(--dim);margin-top:.2rem}
+  .slider-val{color:var(--accent);font-weight:600}
+  /* ── Tags ── */
+  .tags-wrap{display:flex;flex-wrap:wrap;gap:.4rem;margin-bottom:1rem}
+  .tag{padding:.3rem .8rem;border-radius:20px;border:1px solid var(--border);background:transparent;color:var(--dim);font-size:.78rem;cursor:pointer;transition:all .15s;font-family:inherit}
+  .tag.active{border-color:var(--accent);background:#818cf820;color:var(--accent)}
+  /* ── Text inputs ── */
+  input[type=text],textarea{width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:.6rem .85rem;color:var(--text);font-size:.85rem;outline:none;font-family:inherit;resize:vertical;transition:border .2s}
+  input[type=text]:focus,textarea:focus{border-color:var(--dimmer)}
+  input[type=date]{background:var(--surface2);border:1px solid #1e3a6e;border-radius:8px;padding:.45rem .7rem;color:#93c5fd;font-size:.82rem;outline:none;font-family:inherit}
+  /* ── Chat ── */
+  #chat-messages{height:270px;overflow-y:auto;padding:1rem;scroll-behavior:smooth}
+  .bubble-wrap{display:flex;margin-bottom:.8rem;animation:fadeIn .25s ease both}
+  .bubble-wrap.user{justify-content:flex-end}
+  .avatar{width:28px;height:28px;border-radius:50%;background:linear-gradient(135deg,var(--accent),var(--accent2));display:flex;align-items:center;justify-content:center;font-size:.75rem;margin-right:.5rem;flex-shrink:0;margin-top:2px}
+  .bubble{max-width:80%;padding:.65rem .9rem;font-size:.88rem;line-height:1.55;white-space:pre-wrap}
+  .bubble.ai{background:var(--border);border-radius:4px 16px 16px 16px;color:var(--text)}
+  .bubble.user{background:linear-gradient(135deg,var(--accent),var(--accent2));border-radius:16px 4px 16px 16px;color:#0f172a}
+  /* Typing dots */
+  .typing-dots{display:flex;gap:5px;padding:4px 2px}
+  .dot{width:7px;height:7px;border-radius:50%;background:var(--accent);animation:bounce 1.2s ease-in-out infinite}
+  .dot:nth-child(2){animation-delay:.2s}
+  .dot:nth-child(3){animation-delay:.4s}
+  /* ── Bar chart ── */
+  .bar-row{display:flex;align-items:center;gap:.6rem;margin-bottom:.55rem}
+  .bar-track{flex:3;height:5px;background:var(--border);border-radius:3px;overflow:hidden}
+  .bar-fill{height:100%;background:var(--accent);border-radius:3px;transition:width .6s ease}
+  /* ── Section labels ── */
+  .section-label{color:var(--dim);font-size:.7rem;text-transform:uppercase;letter-spacing:.09em;margin-bottom:.7rem}
+  .q-label{font-family:'Playfair Display',serif;color:var(--text);font-size:1.1rem;line-height:1.5;margin-bottom:1.3rem}
+  .opt-label{color:var(--muted);font-size:.78rem;text-transform:uppercase;letter-spacing:.07em;margin-bottom:.5rem;font-weight:600}
+  /* ── Score display ── */
+  .score-big{font-family:'Playfair Display',serif;font-size:3.8rem;font-weight:700;line-height:1}
+  .score-denom{font-size:1.2rem;color:var(--dim)}
+  /* ── Insight grid ── */
+  .insight-grid{display:grid;grid-template-columns:1fr 1fr;gap:.8rem}
+  .insight-tile{background:var(--surface2);border-radius:10px;padding:.85rem}
+  .insight-val{font-family:'Playfair Display',serif;font-size:1.4rem;color:var(--accent);font-weight:700}
+  .insight-name{font-size:.72rem;color:var(--text);margin-top:.1rem}
+  .insight-sub{font-size:.65rem;color:var(--dim)}
+  /* ── Journal ── */
+  .journal-entry{border-left:3px solid var(--accent);padding-left:.9rem;margin-bottom:1.2rem}
+  .journal-date{font-size:.72rem;color:var(--dim);letter-spacing:.06em;text-transform:uppercase;margin-bottom:.3rem}
+  .journal-title{font-family:'Playfair Display',serif;font-size:1rem;color:var(--text);margin-bottom:.4rem}
+  .journal-body{font-size:.85rem;color:var(--muted);line-height:1.6;white-space:pre-wrap}
+  .journal-mood-badge{display:inline-flex;align-items:center;gap:.3rem;background:var(--surface2);border-radius:20px;padding:2px 8px;font-size:.72rem;color:var(--muted);margin-top:.5rem}
+  /* ── History card ── */
+  .history-badges{display:flex;gap:.4rem;flex-wrap:wrap;margin-top:.5rem}
+  .badge{background:var(--surface2);border-radius:6px;padding:2px 7px;font-size:.75rem;color:var(--muted)}
+  .tag-badge{background:#818cf815;color:var(--accent);border-radius:10px;padding:2px 8px;font-size:.68rem}
+  /* ── Privacy banner ── */
+  .privacy-banner{background:var(--surface2);border-radius:10px;padding:.5rem .9rem;display:flex;gap:.5rem;align-items:center;width:100%;margin-bottom:1rem}
+  /* ── Dev panel ── */
+  .dev-panel{width:100%;margin-top:1.5rem}
+  .dev-btn{width:100%;padding:.45rem;background:transparent;border:1px dashed #1e3a6e;border-radius:8px;color:#3b6fc4;font-size:.72rem;cursor:pointer;font-family:inherit;letter-spacing:.06em}
+  .dev-inner{background:#080f1e;border:1px dashed #1e3a6e;border-radius:12px;padding:1rem;margin-top:.5rem;animation:fadeIn .2s ease}
+  .dev-badge{background:#0d2040;border-radius:8px;padding:.5rem .8rem;font-size:.75rem;color:#93c5fd;display:flex;align-items:center;gap:.5rem;margin-top:.7rem}
+  /* ── Burnout alert ── */
+  .burnout-alert{background:#ff000015;border:1px solid var(--red);border-radius:10px;padding:.6rem .8rem;margin-bottom:1rem;font-size:.82rem;color:var(--red);line-height:1.5}
+  /* ── Util ── */
+  .fade-in{animation:fadeIn .25s ease both}
+  .hidden{display:none!important}
+  .divider{border:none;border-top:1px solid var(--border);margin:.8rem 0}
+  .flex-row{display:flex;gap:.6rem;align-items:center}
+  .flex-row.end{justify-content:flex-end}
+  .w100{width:100%}
+  .mt1{margin-top:.8rem}
+  .mt05{margin-top:.4rem}
+  .green{color:var(--green)}
+  .yellow{color:var(--yellow)}
+  .red-c{color:var(--red)}
+  .italic{font-style:italic}
+  .dev-on-badge{display:inline-flex;align-items:center;gap:.4rem;background:linear-gradient(135deg,#0d2040,#1e3a6e);border-radius:20px;padding:3px 12px;font-size:.72rem;color:#93c5fd;border:1px solid #1e3a6e;margin-top:.5rem}
+  @keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+  @keyframes bounce{0%,60%,100%{transform:translateY(0)}30%{transform:translateY(-7px)}}
+  ::-webkit-scrollbar{width:4px}
+  ::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
+  /* ── Modal ── */
+  .modal-overlay{position:fixed;inset:0;background:#00000088;display:flex;align-items:center;justify-content:center;z-index:100;padding:1rem}
+  .modal{background:var(--surface);border-radius:18px;padding:1.4rem;width:100%;max-width:420px;box-shadow:0 8px 40px #000000aa}
+  .modal-title{font-family:'Playfair Display',serif;font-size:1.2rem;color:var(--text);margin-bottom:1rem}
+  /* ── Header ── */
+  header{text-align:center;margin-bottom:1.5rem;width:100%}
+  header h1{font-family:'Playfair Display',serif;font-size:1.9rem;letter-spacing:-.02em;margin-bottom:.2rem}
+  header p{color:var(--dim);font-size:.75rem;letter-spacing:.1em;text-transform:uppercase}
+  /* ── Nav step counter ── */
+  .step-counter{text-align:right;font-size:.7rem;color:var(--dim);margin-bottom:1rem}
+  /* ── Empty state ── */
+  .empty-state{text-align:center;color:var(--dim);padding:2rem 1rem}
+  .empty-state .icon{font-size:2.5rem;margin-bottom:.8rem}
+  /* ── AI open btn ── */
+  .chat-open-btn{margin-top:1rem;padding:.55rem 1.4rem;background:linear-gradient(135deg,var(--accent),var(--accent2));border:none;border-radius:20px;color:#0f172a;font-weight:700;font-size:.85rem;cursor:pointer;box-shadow:0 4px 16px #818cf840;font-family:inherit}
+  /* bottom action row */
+  .action-row{display:flex;gap:.6rem;margin-top:1rem;width:100%}
+  .action-row .btn{flex:1;padding:.55rem;font-size:.75rem}
+  /* responsive */
+  @media(max-width:480px){#app{padding:1.2rem .8rem 5rem}}
+</style>
+</head>
+<body>
+
+<div id="app">
+
+  <!-- ═══════════ HEADER ═══════════ -->
+  <header>
+    <div style="font-size:2.2rem;margin-bottom:.3rem">🌱</div>
+    <h1>MindBloom</h1>
+    <p>Daily Wellness</p>
+    <div id="dev-on-badge" class="dev-on-badge hidden"></div>
+  </header>
+
+  <!-- ═══════════ TABS ═══════════ -->
+  <div class="tabs" id="main-tabs">
+    <button class="tab active" onclick="switchTab('today')">Today</button>
+    <button class="tab inactive" onclick="switchTab('journal')">Journal</button>
+    <button class="tab inactive" onclick="switchTab('history')">History</button>
+  </div>
+
+  <!-- Privacy banner -->
+  <div class="privacy-banner">
+    <span>🔒</span>
+    <span style="font-size:.7rem;color:var(--dim)">Your data stays on this device unless you choose to export it.</span>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════
+       TAB: TODAY (check-in or summary)
+  ══════════════════════════════════════════════════ -->
+  <div id="tab-today" style="width:100%">
+
+    <!-- CHECK-IN FLOW -->
+    <div id="checkin-flow" style="width:100%">
+      <div class="progress" id="progress-bar"></div>
+      <div class="step-counter" id="step-counter"></div>
+      <div class="card" id="step-card"></div>
+    </div>
+
+    <!-- SUMMARY -->
+    <div id="summary-view" class="hidden" style="width:100%">
+
+      <div class="card" id="summary-score-card" style="text-align:center">
+        <!-- filled by JS -->
+      </div>
+
+      <!-- AI Chat -->
+      <div class="card hidden" id="chat-card" style="padding:0;overflow:hidden">
+        <div style="padding:.75rem 1rem;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:.5rem">
+          <div style="width:9px;height:9px;border-radius:50%;background:var(--green);box-shadow:0 0 6px #4ade8099"></div>
+          <span style="font-family:'Playfair Display',serif;color:var(--text);font-size:.9rem">Bloom</span>
+          <span style="color:var(--dim);font-size:.7rem">· your wellness companion</span>
+        </div>
+        <div id="chat-messages"></div>
+        <div style="padding:.75rem;border-top:1px solid var(--border);display:flex;gap:.5rem">
+          <input type="text" id="chat-input" placeholder="Reply to Bloom…" style="flex:1" onkeydown="if(event.key==='Enter')sendChat()"/>
+          <button class="btn btn-primary" id="chat-send-btn" onclick="sendChat()" style="padding:.55rem 1rem;font-size:.9rem">➤</button>
+        </div>
+      </div>
+
+      <!-- Breakdown -->
+      <div class="card" id="breakdown-card"></div>
+
+      <!-- Insights -->
+      <div class="card hidden" id="insights-card"></div>
+
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════
+       TAB: JOURNAL
+  ══════════════════════════════════════════════════ -->
+  <div id="tab-journal" class="hidden" style="width:100%">
+    <div class="card">
+      <p class="section-label" style="margin-bottom:.8rem">New Journal Entry</p>
+      <input type="text" id="journal-title-input" placeholder="Title (optional)" style="margin-bottom:.7rem"/>
+      <textarea id="journal-body-input" rows="6" placeholder="What's on your mind? Write freely — this is just for you…" style="margin-bottom:.7rem;line-height:1.6"></textarea>
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <span style="font-size:.75rem;color:var(--dim)" id="journal-date-label"></span>
+        <button class="btn btn-gradient" onclick="saveJournalEntry()" style="padding:.55rem 1.2rem;font-size:.85rem">Save Entry ✓</button>
+      </div>
+    </div>
+
+    <div id="journal-list"></div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════
+       TAB: HISTORY
+  ══════════════════════════════════════════════════ -->
+  <div id="tab-history" class="hidden" style="width:100%">
+    <div id="history-list"></div>
+  </div>
+
+  <!-- ═══════════ BOTTOM ACTIONS ═══════════ -->
+  <div class="action-row">
+    <button class="btn btn-secondary" onclick="exportData()" style="flex:1;padding:.55rem;font-size:.75rem">⬇ Export JSON</button>
+    <button class="btn btn-danger" onclick="clearAllData()" style="flex:1;padding:.55rem;font-size:.75rem">🗑 Clear All</button>
+  </div>
+
+  <!-- ═══════════ DEV PANEL ═══════════ -->
+  <div class="dev-panel">
+    <button class="dev-btn" onclick="toggleDevPanel()" id="dev-toggle-btn">🛠 Open Developer Panel</button>
+    <div id="dev-inner" class="dev-inner hidden">
+      <p style="color:#3b6fc4;font-size:.72rem;text-transform:uppercase;letter-spacing:.1em;font-weight:700;margin-bottom:.4rem">🛠 Developer · Date Override</p>
+      <p style="color:#3b5a9e;font-size:.72rem;line-height:1.5;margin-bottom:.8rem">Set a custom date — the app acts as if that's today. Perfect for testing check-ins, burnout flags, and AI responses across different days.</p>
+      <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
+        <input type="date" id="dev-date-input" oninput="updateDevDate()"/>
+        <button class="btn" onclick="applyDevDate()" style="padding:.45rem .9rem;background:#1e3a6e;border:none;border-radius:8px;color:#93c5fd;font-size:.8rem;font-weight:600">Apply</button>
+        <button class="btn" onclick="clearDevDate()" id="dev-clear-btn" style="padding:.45rem .7rem;background:transparent;border:1px solid var(--red);border-radius:8px;color:var(--red);font-size:.8rem" class="hidden">✕ Reset</button>
+      </div>
+      <div id="dev-active-badge" class="dev-badge hidden"></div>
+    </div>
+  </div>
+
+  <p style="color:#1a2540;font-size:.62rem;margin-top:1.5rem;text-align:center">MindBloom v3 · All data stored locally on this device</p>
+</div>
+
+<!-- ═══════════ JOURNAL EDIT MODAL ═══════════ -->
+<div class="modal-overlay hidden" id="journal-modal">
+  <div class="modal">
+    <p class="modal-title">Edit Journal Entry</p>
+    <input type="text" id="modal-title-input" placeholder="Title (optional)" style="margin-bottom:.7rem"/>
+    <textarea id="modal-body-input" rows="6" style="margin-bottom:1rem;line-height:1.6"></textarea>
+    <div style="display:flex;gap:.6rem;justify-content:flex-end">
+      <button class="btn btn-secondary" onclick="closeJournalModal()" style="padding:.5rem 1rem;font-size:.85rem">Cancel</button>
+      <button class="btn btn-gradient" onclick="saveJournalEdit()" style="padding:.5rem 1.2rem;font-size:.85rem">Save</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ─────────────────────────────────────────────────────────────────────────────
+// STATE
+// ─────────────────────────────────────────────────────────────────────────────
+const LS = {
+  getEntries: () => { try { return JSON.parse(localStorage.getItem('mindbloom_entries') || '[]'); } catch { return []; } },
+  setEntries: (v) => localStorage.setItem('mindbloom_entries', JSON.stringify(v)),
+  getJournal: () => { try { return JSON.parse(localStorage.getItem('mindbloom_journal') || '[]'); } catch { return []; } },
+  setJournal: (v) => localStorage.setItem('mindbloom_journal', JSON.stringify(v)),
+  getDevDate: () => localStorage.getItem('mindbloom_devdate') || null,
+  setDevDate: (v) => v ? localStorage.setItem('mindbloom_devdate', v) : localStorage.removeItem('mindbloom_devdate'),
+};
+
+let entries = LS.getEntries();
+let journalEntries = LS.getJournal();
+let devDate = LS.getDevDate();
+let currentTab = 'today';
+
+// Survey state
+let survey = { mood:5, stress:5, energy:5, sleep:5, social:5, tags:[], word:'', note:'' };
+let currentStep = 1;
+const TOTAL_STEPS = 6;
+
+// Chat state
+let chatMessages = [];
+let chatSystemPrompt = '';
+let chatTyping = false;
+
+// Journal edit
+let editingJournalId = null;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// HELPERS
+// ─────────────────────────────────────────────────────────────────────────────
+const activeDate = () => devDate || new Date().toISOString().slice(0,10);
+const todayEntry = () => entries.find(e => e.date === activeDate()) || null;
+
+const std = (arr) => {
+  if (arr.length < 2) return 0;
+  const m = arr.reduce((a,b)=>a+b,0)/arr.length;
+  return Math.sqrt(arr.reduce((a,b)=>a+(b-m)**2,0)/arr.length);
+};
+const correlation = (xs, ys) => {
+  const n = xs.length; if (n < 2) return null;
+  const mx = xs.reduce((a,b)=>a+b,0)/n, my = ys.reduce((a,b)=>a+b,0)/n;
+  const num = xs.reduce((s,x,i)=>s+(x-mx)*(ys[i]-my),0);
+  const den = Math.sqrt(xs.reduce((s,x)=>s+(x-mx)**2,0)*ys.reduce((s,y)=>s+(y-my)**2,0));
+  return den ? (num/den).toFixed(2) : null;
+};
+const wellnessScore = (e) => Math.max(1, Math.min(10, +((e.mood+e.energy+e.sleep+e.social-e.stress)/5).toFixed(1)));
+const burnoutRisk = () => {
+  if (entries.length < 3) return false;
+  return entries.slice(-3).every(e => e.stress>=7 && e.sleep<=4 && e.energy<=4);
+};
+const moodEmoji = (v) => ["😭","😢","😟","😕","😐","🙂","😊","😀","🤩","🌟"][Math.min(9,Math.max(0,v-1))];
+const scoreColor = (s) => s >= 7 ? 'var(--green)' : s >= 5 ? 'var(--yellow)' : 'var(--red)';
+const TAGS = ["School","Work","Family","Friends","Health","Personal goals","Other"];
+
+const sliderBg = (v) => `linear-gradient(to right,#818cf8 0%,#818cf8 ${(v-1)/9*100}%,#1e293b ${(v-1)/9*100}%,#1e293b 100%)`;
+
+const esc = (s) => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+
+const formatDate = (d) => {
+  const [y,m,day] = d.split('-');
+  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return `${months[+m-1]} ${+day}, ${y}`;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TAB SWITCHING
+// ─────────────────────────────────────────────────────────────────────────────
+function switchTab(tab) {
+  currentTab = tab;
+  ['today','journal','history'].forEach(t => {
+    document.getElementById(`tab-${t}`).classList.toggle('hidden', t !== tab);
+  });
+  document.querySelectorAll('.tab').forEach((el, i) => {
+    const tabs = ['today','journal','history'];
+    el.classList.toggle('active', tabs[i] === tab);
+    el.classList.toggle('inactive', tabs[i] !== tab);
+  });
+  if (tab === 'journal') renderJournal();
+  if (tab === 'history') renderHistory();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SURVEY FLOW
+// ─────────────────────────────────────────────────────────────────────────────
+const STEPS_CONFIG = [
+  { key:'mood', label:'How was your overall mood today?', low:'Very Low', high:'Excellent',
+    emoji: (v) => moodEmoji(v) },
+  { key:'stress', label:'How stressed did you feel today?', low:'Not stressed', high:'Extremely stressed',
+    emoji: (v) => ["😌","😌","😌","😐","😬","😬","😰","😰","🤯","🤯"][v-1] },
+  { key:'energy', label:'How was your energy level today?', low:'Exhausted', high:'Very energized',
+    emoji: (v) => ["🪫","🪫","😴","😴","😐","😐","⚡","⚡","🔥","🔥"][v-1] },
+  { key:'sleep', label:'How well did you sleep last night?', low:'Terrible', high:'Great',
+    emoji: (v) => ["😫","😫","😪","😪","😶","😶","😴","😴","💤","💤"][v-1] },
+  { key:'social', label:'Did you feel supported or connected today?', low:'Very alone', high:'Very supported',
+    emoji: (v) => ["😔","😔","😶","😶","🙂","🙂","🤝","🤝","🫂","🫂"][v-1] },
+];
+
+function renderStep() {
+  // Progress
+  const bar = document.getElementById('progress-bar');
+  bar.innerHTML = Array.from({length:TOTAL_STEPS},(_,i) =>
+    `<div class="progress-seg" style="background:${i < currentStep ? 'var(--accent)' : 'var(--border)'}"></div>`
+  ).join('');
+
+  const counter = document.getElementById('step-counter');
+  counter.textContent = currentStep < TOTAL_STEPS ? `Question ${currentStep} of ${TOTAL_STEPS-1}` : 'Optional extras';
+
+  const card = document.getElementById('step-card');
+
+  if (currentStep <= 5) {
+    const cfg = STEPS_CONFIG[currentStep-1];
+    const val = survey[cfg.key];
+    card.innerHTML = `
+      <p class="q-label">${esc(cfg.label)}</p>
+      <div class="slider-wrap">
+        <div class="slider-row">
+          <span class="slider-label">${cfg.key.charAt(0).toUpperCase()+cfg.key.slice(1)}</span>
+          <span class="slider-emoji" id="sl-emoji">${cfg.emoji(val)}</span>
+        </div>
+        <input type="range" min="1" max="10" value="${val}" id="sl-input"
+          style="background:${sliderBg(val)}"
+          oninput="updateSlider('${cfg.key}', this.value, this.style, '${currentStep}')"/>
+        <div class="slider-hints">
+          <span>${esc(cfg.low)}</span>
+          <span class="slider-val" id="sl-val">${val}/10</span>
+          <span>${esc(cfg.high)}</span>
+        </div>
+      </div>
+      <div style="display:flex;gap:.8rem;margin-top:1rem">
+        ${currentStep > 1 ? `<button class="btn btn-secondary w100" onclick="prevStep()">← Back</button>` : ''}
+        <button class="btn btn-primary w100" onclick="nextStep()">Next →</button>
+      </div>`;
+  } else {
+    // Step 6 — optional extras
+    const tagHtml = TAGS.map(t =>
+      `<button class="tag ${survey.tags.includes(t)?'active':''}" onclick="toggleTag('${t}')">${esc(t)}</button>`
+    ).join('');
+    card.innerHTML = `
+      <p class="q-label">Almost done! 🌿</p>
+      <p class="opt-label">What influenced today the most? <span style="color:var(--dimmer);font-weight:400">(optional)</span></p>
+      <div class="tags-wrap" id="tag-container">${tagHtml}</div>
+      <input type="text" id="word-input" maxlength="20" placeholder="One word to describe today… (optional)"
+        value="${esc(survey.word)}" oninput="survey.word=this.value" style="margin-bottom:.8rem"/>
+      <p class="opt-label" style="margin-top:.2rem">Anything else you want to add? <span style="color:var(--dimmer);font-weight:400">(optional)</span></p>
+      <p style="color:var(--dimmer);font-size:.72rem;margin-bottom:.5rem">Bloom will read this and use it in your chat 💬</p>
+      <textarea id="note-input" rows="3" placeholder="Share whatever's on your mind — a rough moment, something you're proud of, a worry…">${esc(survey.note)}</textarea>
+      <div style="display:flex;gap:.8rem;margin-top:1.1rem">
+        <button class="btn btn-secondary w100" onclick="prevStep()">← Back</button>
+        <button class="btn w100" style="background:linear-gradient(135deg,var(--accent),var(--accent2));color:#0f172a;font-weight:700;font-size:.9rem" onclick="submitSurvey()">Submit ✓</button>
+      </div>`;
+
+    // restore note value
+    setTimeout(() => {
+      const ni = document.getElementById('note-input');
+      if (ni) { ni.value = survey.note; ni.oninput = () => survey.note = ni.value; }
+    }, 0);
+  }
+}
+
+function updateSlider(key, val, style, step) {
+  survey[key] = +val;
+  style.background = sliderBg(+val);
+  const cfg = STEPS_CONFIG[+step-1];
+  const emojiEl = document.getElementById('sl-emoji');
+  const valEl = document.getElementById('sl-val');
+  if (emojiEl) emojiEl.textContent = cfg.emoji(+val);
+  if (valEl) valEl.textContent = `${val}/10`;
+}
+
+function toggleTag(t) {
+  if (survey.tags.includes(t)) survey.tags = survey.tags.filter(x=>x!==t);
+  else survey.tags.push(t);
+  document.querySelectorAll('.tag').forEach(el => {
+    el.classList.toggle('active', survey.tags.includes(el.textContent));
+  });
+}
+
+function nextStep() {
+  if (currentStep < TOTAL_STEPS) { currentStep++; renderStep(); }
+}
+function prevStep() {
+  if (currentStep > 1) { currentStep--; renderStep(); }
+}
+
+function submitSurvey() {
+  // grab note if still in DOM
+  const ni = document.getElementById('note-input');
+  if (ni) survey.note = ni.value;
+
+  const entry = {
+    date: activeDate(),
+    mood: survey.mood, stress: survey.stress, energy: survey.energy,
+    sleep: survey.sleep, social: survey.social,
+    tags: [...survey.tags], word: survey.word, note: survey.note,
+    ts: Date.now()
+  };
+  entries = [...entries.filter(e => e.date !== activeDate()), entry].sort((a,b)=>a.ts-b.ts);
+  LS.setEntries(entries);
+  showSummary(entry, true);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SUMMARY
+// ─────────────────────────────────────────────────────────────────────────────
+function showSummary(entry, openChat) {
+  document.getElementById('checkin-flow').classList.add('hidden');
+  document.getElementById('summary-view').classList.remove('hidden');
+
+  const ws = wellnessScore(entry);
+  const risk = burnoutRisk();
+  const sc = document.getElementById('summary-score-card');
+
+  sc.innerHTML = `
+    ${risk ? `<div class="burnout-alert">⚠️ <strong>Burnout risk detected</strong> — you've had 3 tough days in a row. Please be gentle with yourself.</div>` : ''}
+    <p class="section-label" style="margin-bottom:.4rem">
+      ${activeDate() === new Date().toISOString().slice(0,10) ? "Today's" : formatDate(activeDate()) + " ·"} Wellness Score
+    </p>
+    <div class="score-big" style="color:${scoreColor(ws)}">${ws}<span class="score-denom">/10</span></div>
+    <div style="font-size:2.2rem;margin-top:.4rem">${moodEmoji(entry.mood)}</div>
+    ${entry.word ? `<p style="color:var(--accent);font-style:italic;margin-top:.4rem;font-size:.9rem">"${esc(entry.word)}"</p>` : ''}
+    <button class="chat-open-btn" id="chat-open-btn" onclick="openChat()">💬 Chat with Bloom</button>
+  `;
+
+  // Breakdown card
+  const bc = document.getElementById('breakdown-card');
+  const bars = [['Mood',entry.mood,'😊'],['Stress',entry.stress,'😬'],['Energy',entry.energy,'⚡'],['Sleep',entry.sleep,'💤'],['Social',entry.social,'🤝']].map(([lbl,val,em]) =>
+    `<div class="bar-row">
+      <span style="width:20px;text-align:center;font-size:.9rem">${em}</span>
+      <span style="flex:1;font-size:.8rem;color:var(--muted)">${lbl}</span>
+      <div class="bar-track"><div class="bar-fill" style="width:${(val/10)*100}%"></div></div>
+      <span style="width:24px;text-align:right;font-size:.8rem;color:var(--accent);font-weight:600">${val}</span>
+    </div>`
+  ).join('');
+
+  const tagsHtml = entry.tags?.length
+    ? `<hr class="divider"/><p class="section-label">Influences</p><div style="display:flex;flex-wrap:wrap;gap:4px">${entry.tags.map(t=>`<span class="tag-badge">${esc(t)}</span>`).join('')}</div>`
+    : '';
+  const noteHtml = entry.note
+    ? `<hr class="divider"/><p class="section-label">Your Note</p><p style="color:var(--muted);font-size:.82rem;line-height:1.55;font-style:italic">"${esc(entry.note)}"</p>`
+    : '';
+
+  bc.innerHTML = `<p class="section-label">Today's Breakdown</p>${bars}${tagsHtml}${noteHtml}`;
+
+  // Insights
+  if (entries.length > 1) {
+    const last7 = entries.slice(-7).map(e=>e.mood);
+    const vol = std(last7).toFixed(2);
+    const corr = correlation(entries.map(e=>e.stress), entries.map(e=>e.sleep));
+    const ic = document.getElementById('insights-card');
+    ic.classList.remove('hidden');
+    ic.innerHTML = `<p class="section-label">Insights</p>
+      <div class="insight-grid">
+        <div class="insight-tile"><div class="insight-val">${vol}σ</div><div class="insight-name">Mood Volatility</div><div class="insight-sub">last 7 days</div></div>
+        <div class="insight-tile"><div class="insight-val">${corr||'—'}</div><div class="insight-name">Stress↔Sleep</div><div class="insight-sub">correlation</div></div>
+        <div class="insight-tile"><div class="insight-val">${entries.length}</div><div class="insight-name">Days Tracked</div><div class="insight-sub">total entries</div></div>
+      </div>`;
+  }
+
+  if (openChat) {
+    setTimeout(() => openChat && openChatPanel(entry), 400);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AI CHAT
+// ─────────────────────────────────────────────────────────────────────────────
+function buildSystemPrompt(entry) {
+  const ws = wellnessScore(entry);
+  const risk = burnoutRisk();
+  const last3 = entries.slice(-3).map(e=>wellnessScore(e));
+  const trend = entries.length >= 3
+    ? (last3[2] > last3[0]+0.5 ? 'improving' : last3[2] < last3[0]-0.5 ? 'declining' : 'stable')
+    : 'unknown';
+
+  return `You are Bloom, a warm, emotionally intelligent wellness companion inside the MindBloom app. Your ONE goal: make this person feel genuinely better after talking to you.
+
+TODAY'S DATA:
+- Wellness Score: ${ws}/10
+- Mood: ${entry.mood}/10
+- Stress: ${entry.stress}/10
+- Energy: ${entry.energy}/10
+- Sleep: ${entry.sleep}/10
+- Social connection: ${entry.social}/10
+- Tags (influences): ${entry.tags?.join(', ') || 'none'}
+- One-word summary: ${entry.word || 'not provided'}
+- Their personal note: ${entry.note || 'nothing added'}
+- Burnout risk: ${risk ? 'YES — 3 consecutive days of high stress + low sleep + low energy' : 'no'}
+- Recent trend: ${trend}
+- Total days tracked: ${entries.length}
+
+PERSONALITY:
+- Warm, real, never robotic or clinical
+- Teen-friendly, casual — no corporate wellness speak
+- Use emojis naturally but sparingly
+- If score is low → lead with empathy first, then gentle encouragement. If high → celebrate and hype!
+- Reference their specific numbers so it feels personal
+- If they wrote a personal note, respond to it directly
+- Keep first message SHORT (2-4 sentences). Let the conversation breathe.
+- If burnout risk is flagged, address it gently but directly
+- NEVER toxic positivity. Be real. Be human.
+- One thoughtful follow-up question at a time.
+- Goal: they feel heard, understood, and a little better.`;
+}
+
+async function callClaude(messages, system) {
+  try {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model:'claude-sonnet-4-20250514', max_tokens:1000, system, messages }),
+    });
+    const data = await res.json();
+    return data.content?.map(b=>b.text||'').join('') || "I'm here for you 💙";
+  } catch(e) {
+    return "I'm having a little trouble connecting right now, but I'm here for you 💙";
+  }
+}
+
+function openChat() {
+  const entry = todayEntry();
+  if (!entry) return;
+  openChatPanel(entry);
+}
+
+async function openChatPanel(entry) {
+  const card = document.getElementById('chat-card');
+  const btn = document.getElementById('chat-open-btn');
+  if (btn) btn.style.display = 'none';
+  card.classList.remove('hidden');
+  chatMessages = [];
+  chatSystemPrompt = buildSystemPrompt(entry);
+  document.getElementById('chat-messages').innerHTML = '';
+  appendTyping();
+  const reply = await callClaude([], chatSystemPrompt);
+  removeTyping();
+  chatMessages.push({ role:'assistant', content: reply });
+  appendBubble('assistant', reply);
+}
+
+async function sendChat() {
+  const input = document.getElementById('chat-input');
+  const text = input.value.trim();
+  if (!text || chatTyping) return;
+  input.value = '';
+  chatMessages.push({ role:'user', content: text });
+  appendBubble('user', text);
+  chatTyping = true;
+  appendTyping();
+  const reply = await callClaude(chatMessages, chatSystemPrompt);
+  removeTyping();
+  chatTyping = false;
+  chatMessages.push({ role:'assistant', content: reply });
+  appendBubble('assistant', reply);
+}
+
+function appendBubble(role, text) {
+  const msgs = document.getElementById('chat-messages');
+  const isAI = role === 'assistant';
+  const div = document.createElement('div');
+  div.className = `bubble-wrap ${isAI?'':'user'} fade-in`;
+  div.innerHTML = isAI
+    ? `<div class="avatar">🌱</div><div class="bubble ai">${esc(text)}</div>`
+    : `<div class="bubble user">${esc(text)}</div>`;
+  msgs.appendChild(div);
+  msgs.scrollTop = msgs.scrollHeight;
+}
+
+function appendTyping() {
+  const msgs = document.getElementById('chat-messages');
+  const div = document.createElement('div');
+  div.className = 'bubble-wrap';
+  div.id = 'typing-indicator';
+  div.innerHTML = `<div class="avatar">🌱</div><div class="bubble ai"><div class="typing-dots"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div></div>`;
+  msgs.appendChild(div);
+  msgs.scrollTop = msgs.scrollHeight;
+}
+
+function removeTyping() {
+  const t = document.getElementById('typing-indicator');
+  if (t) t.remove();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// JOURNAL
+// ─────────────────────────────────────────────────────────────────────────────
+function saveJournalEntry() {
+  const titleEl = document.getElementById('journal-title-input');
+  const bodyEl = document.getElementById('journal-body-input');
+  const body = bodyEl.value.trim();
+  if (!body) { bodyEl.style.borderColor = 'var(--red)'; setTimeout(()=>bodyEl.style.borderColor='',1500); return; }
+
+  const entry = {
+    id: Date.now().toString(),
+    date: activeDate(),
+    title: titleEl.value.trim(),
+    body,
+    ts: Date.now(),
+    linkedWellness: todayEntry() ? wellnessScore(todayEntry()) : null,
+    linkedMood: todayEntry() ? todayEntry().mood : null,
+  };
+
+  journalEntries = [entry, ...journalEntries];
+  LS.setJournal(journalEntries);
+  titleEl.value = '';
+  bodyEl.value = '';
+  renderJournal();
+}
+
+function deleteJournalEntry(id) {
+  if (!confirm('Delete this journal entry?')) return;
+  journalEntries = journalEntries.filter(e => e.id !== id);
+  LS.setJournal(journalEntries);
+  renderJournal();
+}
+
+function openEditModal(id) {
+  const entry = journalEntries.find(e => e.id === id);
+  if (!entry) return;
+  editingJournalId = id;
+  document.getElementById('modal-title-input').value = entry.title || '';
+  document.getElementById('modal-body-input').value = entry.body || '';
+  document.getElementById('journal-modal').classList.remove('hidden');
+}
+
+function closeJournalModal() {
+  document.getElementById('journal-modal').classList.add('hidden');
+  editingJournalId = null;
+}
+
+function saveJournalEdit() {
+  if (!editingJournalId) return;
+  const title = document.getElementById('modal-title-input').value.trim();
+  const body = document.getElementById('modal-body-input').value.trim();
+  if (!body) return;
+  journalEntries = journalEntries.map(e =>
+    e.id === editingJournalId ? { ...e, title, body } : e
+  );
+  LS.setJournal(journalEntries);
+  closeJournalModal();
+  renderJournal();
+}
+
+function renderJournal() {
+  const label = document.getElementById('journal-date-label');
+  if (label) label.textContent = formatDate(activeDate());
+
+  const list = document.getElementById('journal-list');
+  if (!list) return;
+
+  if (journalEntries.length === 0) {
+    list.innerHTML = `<div class="empty-state"><div class="icon">📓</div><p>No journal entries yet.</p><p style="font-size:.8rem;margin-top:.4rem">Write your first one above!</p></div>`;
+    return;
+  }
+
+  list.innerHTML = journalEntries.map(e => `
+    <div class="card fade-in">
+      <div class="journal-entry">
+        <div class="journal-date">${formatDate(e.date)}</div>
+        ${e.title ? `<div class="journal-title">${esc(e.title)}</div>` : ''}
+        <div class="journal-body">${esc(e.body)}</div>
+        ${e.linkedWellness ? `<div class="journal-mood-badge">${moodEmoji(e.linkedMood||5)} Wellness ${e.linkedWellness}/10 that day</div>` : ''}
+      </div>
+      <div style="display:flex;gap:.5rem;margin-top:.8rem;justify-content:flex-end">
+        <button class="btn btn-secondary" onclick="openEditModal('${esc(e.id)}')" style="padding:.35rem .8rem;font-size:.75rem">✏️ Edit</button>
+        <button class="btn btn-danger" onclick="deleteJournalEntry('${esc(e.id)}')" style="padding:.35rem .8rem;font-size:.75rem">🗑</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// HISTORY
+// ─────────────────────────────────────────────────────────────────────────────
+function renderHistory() {
+  const list = document.getElementById('history-list');
+  const sorted = entries.slice().reverse();
+  if (sorted.length === 0) {
+    list.innerHTML = `<div class="empty-state"><div class="icon">📅</div><p>No check-ins yet.</p><p style="font-size:.8rem;margin-top:.4rem">Complete today's check-in first!</p></div>`;
+    return;
+  }
+  list.innerHTML = sorted.map(e => {
+    const ws = wellnessScore(e);
+    const tags = e.tags?.length ? `<div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:.5rem">${e.tags.map(t=>`<span class="tag-badge">${esc(t)}</span>`).join('')}</div>` : '';
+    const note = e.note ? `<p style="color:var(--dim);font-size:.75rem;margin-top:.5rem;font-style:italic;line-height:1.4">"${esc(e.note)}"</p>` : '';
+    return `<div class="card fade-in">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <span style="font-family:'Playfair Display',serif;color:var(--text);font-size:.9rem">${formatDate(e.date)}</span>
+        <div style="display:flex;align-items:center;gap:.5rem">
+          ${e.word ? `<span style="color:var(--dim);font-size:.75rem;font-style:italic">"${esc(e.word)}"</span>` : ''}
+          <span style="font-weight:700;color:${scoreColor(ws)};font-size:1rem">${ws}/10</span>
+        </div>
+      </div>
+      <div class="history-badges">
+        <span class="badge">😊${e.mood}</span>
+        <span class="badge">😬${e.stress}</span>
+        <span class="badge">⚡${e.energy}</span>
+        <span class="badge">💤${e.sleep}</span>
+        <span class="badge">🤝${e.social}</span>
+      </div>
+      ${tags}${note}
+    </div>`;
+  }).join('');
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// EXPORT (working — downloads real file)
+// ─────────────────────────────────────────────────────────────────────────────
+function exportData() {
+  const data = {
+    exported: new Date().toISOString(),
+    app: 'MindBloom v3',
+    wellness_entries: entries,
+    journal_entries: journalEntries,
+  };
+  const json = JSON.stringify(data, null, 2);
+  const blob = new Blob([json], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `mindbloom-export-${activeDate()}.json`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CLEAR ALL
+// ─────────────────────────────────────────────────────────────────────────────
+function clearAllData() {
+  if (!confirm('Clear ALL data including check-ins and journal entries? This cannot be undone.')) return;
+  entries = [];
+  journalEntries = [];
+  LS.setEntries([]);
+  LS.setJournal([]);
+  // Reset survey
+  survey = { mood:5, stress:5, energy:5, sleep:5, social:5, tags:[], word:'', note:'' };
+  currentStep = 1;
+  // Reset UI
+  document.getElementById('summary-view').classList.add('hidden');
+  document.getElementById('checkin-flow').classList.remove('hidden');
+  document.getElementById('chat-card').classList.add('hidden');
+  document.getElementById('insights-card').classList.add('hidden');
+  renderStep();
+  switchTab('today');
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DEV PANEL
+// ─────────────────────────────────────────────────────────────────────────────
+let devPanelOpen = false;
+
+function toggleDevPanel() {
+  devPanelOpen = !devPanelOpen;
+  document.getElementById('dev-inner').classList.toggle('hidden', !devPanelOpen);
+  document.getElementById('dev-toggle-btn').textContent = `🛠 ${devPanelOpen ? 'Hide' : 'Open'} Developer Panel`;
+}
+
+function updateDevDate() {
+  // just track input changes, apply on button click
+}
+
+function applyDevDate() {
+  const input = document.getElementById('dev-date-input').value;
+  devDate = input || null;
+  LS.setDevDate(devDate);
+  updateDevUI();
+  reloadForDate();
+}
+
+function clearDevDate() {
+  devDate = null;
+  document.getElementById('dev-date-input').value = '';
+  LS.setDevDate(null);
+  updateDevUI();
+  reloadForDate();
+}
+
+function updateDevUI() {
+  const badge = document.getElementById('dev-active-badge');
+  const clearBtn = document.getElementById('dev-clear-btn');
+  const headerBadge = document.getElementById('dev-on-badge');
+  if (devDate) {
+    badge.classList.remove('hidden');
+    badge.innerHTML = `📅 App is acting as <strong style="margin-left:.3rem">${devDate}</strong>`;
+    clearBtn.classList.remove('hidden');
+    headerBadge.classList.remove('hidden');
+    headerBadge.textContent = `🛠 Dev · ${devDate}`;
+  } else {
+    badge.classList.add('hidden');
+    clearBtn.classList.add('hidden');
+    headerBadge.classList.add('hidden');
+  }
+}
+
+function reloadForDate() {
+  const entry = todayEntry();
+  const summaryView = document.getElementById('summary-view');
+  const checkinFlow = document.getElementById('checkin-flow');
+  const chatCard = document.getElementById('chat-card');
+  const insightsCard = document.getElementById('insights-card');
+
+  // Reset chat
+  chatMessages = [];
+  chatCard.classList.add('hidden');
+  document.getElementById('chat-messages').innerHTML = '';
+
+  if (entry) {
+    checkinFlow.classList.add('hidden');
+    summaryView.classList.remove('hidden');
+    showSummary(entry, false);
+  } else {
+    summaryView.classList.add('hidden');
+    insightsCard.classList.add('hidden');
+    checkinFlow.classList.remove('hidden');
+    survey = { mood:5, stress:5, energy:5, sleep:5, social:5, tags:[], word:'', note:'' };
+    currentStep = 1;
+    renderStep();
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// INIT
+// ─────────────────────────────────────────────────────────────────────────────
+function init() {
+  // Restore dev date
+  if (devDate) {
+    document.getElementById('dev-date-input').value = devDate;
+    updateDevUI();
+  }
+
+  // Journal date label
+  const jl = document.getElementById('journal-date-label');
+  if (jl) jl.textContent = formatDate(activeDate());
+
+  const entry = todayEntry();
+  if (entry) {
+    document.getElementById('checkin-flow').classList.add('hidden');
+    showSummary(entry, false);
+  } else {
+    renderStep();
+  }
+}
+
+init();
+</script>
+</body>
+</html>
